@@ -1,81 +1,83 @@
 // navigationUtils.ts
 
-export type Node = { x: number; y: number; name: string; isExit?: boolean };
+export type Node = { x: number; y: number; name: string; isAssembly?: boolean };
 
 export const CAMPUS_LIMITS = {
-  north: 13.165928,
-  south: 13.162526,
-  west: 123.747779,
-  east: 123.751222,
+  north: 13.165857,
+  south: 13.162422,
+  west: 123.747844,
+  east: 123.751555,
 };
 
+// 1. Define the exact corner-to-corner perimeter of your primary evacuation area
+export const EVACUATION_POLYGON = [
+  { x: 42.7, y: 72.1 }, // NODE_1
+  { x: 30.3, y: 72.1 }, // NODE_2
+  { x: 30.0, y: 58.1 }, // NODE_3
+  { x: 33.2, y: 54.4 }, // NODE_4
+  { x: 43.3, y: 54.4 }, // NODE_5
+  { x: 42.8, y: 71.8 }, // NODE_6
+];
+
+// 2. Define the second evacuation area perimeter for Building 3 (non-overlapping unique keys)
+export const EVACUATION_POLYGON_2 = [
+  { x: 63.1, y: 65.5 }, // EVAC2_NODE_1
+  { x: 49.5, y: 64.8 }, // EVAC2_NODE_2
+  { x: 49.7, y: 60.8 }, // EVAC2_NODE_3
+  { x: 63.1, y: 61.7 }, // EVAC2_NODE_4
+  { x: 63.1, y: 65.2 }, // EVAC2_NODE_5
+];
+
 export const NODES: Record<string, Node> = {
-  NODE_1: { x: 87.7, y: 39.9, name: 'Gate 4', isExit: true },
-  NODE_2: { x: 88.1, y: 30.6, name: 'Node 2' },
-  NODE_3: { x: 87.9, y: 30.6, name: 'Node 3' },
-  NODE_4: { x: 64.4, y: 29.6, name: 'Node 4' },
-  NODE_5: { x: 64.1, y: 29.9, name: 'Node 5' },
-  NODE_6: { x: 46.3, y: 29.1, name: 'Node 6' },
-  NODE_7: { x: 46.4, y: 28.9, name: 'Node 7' },
-  NODE_8: { x: 45.0, y: 52.8, name: 'Node 8' },
-  NODE_9: { x: 44.9, y: 53.3, name: 'Node 9' },
-  NODE_10: { x: 44.0, y: 73.4, name: 'Node 10' },
-  NODE_11: { x: 44.0, y: 73.3, name: 'Node 11' },
-  NODE_12: { x: 58.1, y: 74.3, name: 'Node 12' },
-  NODE_13: { x: 58.4, y: 74.0, name: 'Node 13' },
-  NODE_14: { x: 86.1, y: 75.0, name: 'Node 14' },
-  NODE_15: { x: 86.4, y: 74.5, name: 'Node 15' },
-  NODE_16: { x: 86.6, y: 71.6, name: 'Gate 3', isExit: true },
-  NODE_17: { x: 45.1, y: 53.1, name: 'Node 17' },
-  NODE_18: { x: 62.7, y: 53.1, name: 'Node 18' },
-  NODE_19: { x: 62.9, y: 53.1, name: 'Node 19' },
-  NODE_20: { x: 86.8, y: 52.9, name: 'Node 20' },
-  NODE_21: { x: 86.9, y: 52.9, name: 'Node 21' },
-  NODE_22: { x: 87.8, y: 43.2, name: 'Node 22' },
-  NODE_23: { x: 28.6, y: 73.2, name: 'NODE_23' },
-  NODE_24: { x: 43.9, y: 73.3, name: 'NODE_24' },
-  // Newly added indoor / building nodes
-  NODE_25: { x: 43.6, y: 73.7, name: 'Indoor Entrance' },
-  NODE_26: { x: 39.9, y: 76.2, name: 'Indoor Hallway 1' },
-  NODE_27: { x: 39.9, y: 76.3, name: 'Indoor Hallway 2' },
-  NODE_28: { x: 38.4, y: 78.7, name: 'Indoor Room A' },
-  NODE_29: { x: 38.4, y: 78.6, name: 'Indoor Room B' },
-  NODE_30: { x: 38.2, y: 81.2, name: 'Deep Indoor Room / Lab' },
+  // Your original area routes
+  NODE_0: { x: 46.7, y: 76, name: "DOME" },
+  NODE_1: { x: 59.2, y: 79.8, name: "PAVILION" },
+  NODE_2: { x: 42.6, y: 72.2, name: "ASSEMBLY POINT", isAssembly: true },
+  NODE_3: { x: 42.9, y: 70.9, name: "ASSEMBLY POINT", isAssembly: true },
+
+  // Your previously added separate route nodes
+  NEW_NODE_1: { x: 34.1, y: 80.6, name: "NEW_AREA_NODE_1" },
+  NEW_NODE_2: { x: 34.2, y: 72.4, name: "ASSEMBLY POINT", isAssembly: true },
+
+  // Sequential nodes for Building 2
+  BLDG2_NODE_1: { x: 59.7, y: 66.6, name: "BLDG2_NODE_1" },
+  BLDG2_NODE_2: { x: 56.5, y: 66.6, name: "BLDG2_NODE_2" },
+  BLDG2_NODE_3: { x: 53.5, y: 66.5, name: "BLDG2_NODE_3" },
+  BLDG2_NODE_4: { x: 50.2, y: 66.4, name: "BLDG2_NODE_4" },
+  BLDG2_NODE_5: { x: 47.1, y: 66.3, name: "BLDG2_NODE_5" },
+  BLDG2_NODE_6: { x: 43.2, y: 66.1, name: "BLDG2_NODE_6", isAssembly: true },
+
+  // Sequential nodes for Building 3
+  BLDG3_NODE_1: { x: 75.5, y: 67.8, name: "BLDG3_NODE_1" },
+  BLDG3_NODE_2: { x: 72.2, y: 67.6, name: "BLDG3_NODE_2" },
+  BLDG3_NODE_3: { x: 69.1, y: 67.6, name: "BLDG3_NODE_3" },
+  BLDG3_NODE_4: { x: 66, y: 67.4, name: "BLDG3_NODE_4" },
+  BLDG3_NODE_5: { x: 63, y: 67.3, name: "BLDG3_NODE_5" },
+  BLDG3_NODE_6: { x: 61.1, y: 65.4, name: "ASSEMBLY POINT", isAssembly: true },
+
 };
 
 export const RAW_EDGES = [
-  { from: 'NODE_1', to: 'NODE_2' },
-  { from: 'NODE_2', to: 'NODE_3' },
-  { from: 'NODE_3', to: 'NODE_4' },
-  { from: 'NODE_4', to: 'NODE_5' },
-  { from: 'NODE_5', to: 'NODE_6' },
-  { from: 'NODE_6', to: 'NODE_7' },
-  { from: 'NODE_7', to: 'NODE_8' },
-  { from: 'NODE_8', to: 'NODE_9' },
-  { from: 'NODE_9', to: 'NODE_10' },
-  { from: 'NODE_10', to: 'NODE_11' },
-  { from: 'NODE_11', to: 'NODE_12' },
-  { from: 'NODE_12', to: 'NODE_13' },
-  { from: 'NODE_13', to: 'NODE_14' },
-  { from: 'NODE_14', to: 'NODE_15' },
-  { from: 'NODE_15', to: 'NODE_16' },
-  { from: 'NODE_17', to: 'NODE_18' },
-  { from: 'NODE_18', to: 'NODE_19' },
-  { from: 'NODE_19', to: 'NODE_20' },
-  { from: 'NODE_20', to: 'NODE_21' },
-  { from: 'NODE_21', to: 'NODE_22' },
-  { from: 'NODE_9', to: 'NODE_17' },
-  { from: 'NODE_22', to: 'NODE_1' },
-  { from: 'NODE_23', to: 'NODE_24' },
-  { from: 'NODE_24', to: 'NODE_10' },
-  // Indoor pathway connections
-  { from: 'NODE_25', to: 'NODE_26' },
-  { from: 'NODE_26', to: 'NODE_27' },
-  { from: 'NODE_27', to: 'NODE_28' },
-  { from: 'NODE_28', to: 'NODE_29' },
-  { from: 'NODE_29', to: 'NODE_30' },
-  // Bridge connecting indoor network to the outdoor campus network (at NODE_10)
-  { from: 'NODE_25', to: 'NODE_10' },
+  // Original edgess
+  { from: 'NODE_0', to: 'NODE_2' },
+  { from: 'NODE_1', to: 'NODE_3' },
+
+  // New edges for the separate route
+  { from: 'NEW_NODE_1', to: 'NEW_NODE_2' },
+
+  // Sequential edges for Building 2
+  { from: 'BLDG2_NODE_1', to: 'BLDG2_NODE_2' },
+  { from: 'BLDG2_NODE_2', to: 'BLDG2_NODE_3' },
+  { from: 'BLDG2_NODE_3', to: 'BLDG2_NODE_4' },
+  { from: 'BLDG2_NODE_4', to: 'BLDG2_NODE_5' },
+  { from: 'BLDG2_NODE_5', to: 'BLDG2_NODE_6' },
+
+  // Sequential edges for Building 3
+  { from: 'BLDG3_NODE_1', to: 'BLDG3_NODE_2' },
+  { from: 'BLDG3_NODE_2', to: 'BLDG3_NODE_3' },
+  { from: 'BLDG3_NODE_3', to: 'BLDG3_NODE_4' },
+  { from: 'BLDG3_NODE_4', to: 'BLDG3_NODE_5' },
+  { from: 'BLDG3_NODE_5', to: 'BLDG3_NODE_6' },
 ];
 
 export const getDistanceInMeters = (
@@ -112,6 +114,20 @@ export interface StepInstruction {
   targetNode: Node;
 }
 
+// Ray-casting algorithm: checks if user is anywhere inside a given polygon boundary
+function isPointInsidePolygon(point: { x: number; y: number }, polygon: { x: number; y: number }[]) {
+  let x = point.x, y = point.y;
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    let xi = polygon[i].x, yi = polygon[i].y;
+    let xj = polygon[j].x, yj = polygon[j].y;
+    
+    let intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
 export function calculateShortestPath(
   userPos: { x: number; y: number },
   blockedNodes: Set<string>
@@ -120,6 +136,30 @@ export function calculateShortestPath(
   directions: StepInstruction[];
   warningMessage?: string;
 } {
+  // If the user steps anywhere inside either evacuation polygon boundary, instantly clear route & trigger arrival
+  if (isPointInsidePolygon(userPos, EVACUATION_POLYGON) || isPointInsidePolygon(userPos, EVACUATION_POLYGON_2)) {
+    return {
+      pathString: null,
+      directions: [
+        {
+          msg: `You have safely arrived at the evacuation zone.`,
+          dist: 0,
+          targetNode: NODES.NODE_2,
+        },
+      ],
+    };
+  }
+
+  const activeAssemblies = Object.keys(NODES).filter((n) => NODES[n].isAssembly && !blockedNodes.has(n));
+
+  if (activeAssemblies.length === 0) {
+    return {
+      pathString: null,
+      directions: [],
+      warningMessage: 'Warning! All assembly areas are currently blocked.',
+    };
+  }
+
   const startNodeId = Object.keys(NODES).reduce((prev, curr) => {
     const dP = Math.hypot(NODES[prev].x - userPos.x, NODES[prev].y - userPos.y);
     const dC = Math.hypot(NODES[curr].x - userPos.x, NODES[curr].y - userPos.y);
@@ -159,23 +199,15 @@ export function calculateShortestPath(
     });
   }
 
-  const activeGates = Object.keys(NODES).filter((n) => NODES[n].isExit && !blockedNodes.has(n));
-
-  if (activeGates.length === 0) {
-    return {
-      pathString: null,
-      directions: [],
-      warningMessage: 'Warning! All exit gates are currently blocked.',
-    };
-  }
-
-  const destinationId = activeGates.reduce((best, gate) => (distances[gate] < distances[best] ? gate : best));
+  const destinationId = activeAssemblies.reduce((best, assembly) => 
+    (distances[assembly] < distances[best] ? assembly : best)
+  );
 
   if (distances[destinationId] === Infinity) {
     return {
       pathString: null,
       directions: [],
-      warningMessage: 'Warning! All routes to exits are currently blocked by fire hazards.',
+      warningMessage: 'Warning! All routes to safe assembly zones are currently blocked by hazards.',
     };
   }
 
@@ -195,66 +227,15 @@ export function calculateShortestPath(
     const distMeters = Math.round(getDistanceInMeters(nodeA, nodeB));
 
     if (i === pathNodes.length - 2) {
-      rawSteps.push({ msg: `Arrive at ${nodeB.name}`, dist: distMeters, type: 'ARRIVE', targetNode: nodeB });
+      rawSteps.push({ msg: `Arrive safely at ${nodeB.name}`, dist: distMeters, type: 'ARRIVE', targetNode: nodeB });
       break;
     }
 
-    let action = 'Continue straight down the walkway';
-    let stepType: 'STRAIGHT' | 'TURN' = 'STRAIGHT';
-
-    if (i > 0) {
-      const nodePrev = NODES[pathNodes[i - 1]];
-      const angle1 = Math.atan2(nodeA.y - nodePrev.y, nodeA.x - nodePrev.x) * (180 / Math.PI);
-      const angle2 = Math.atan2(nodeB.y - nodeA.y, nodeB.x - nodeA.x) * (180 / Math.PI);
-
-      let turnAngle = angle2 - angle1;
-      while (turnAngle > 180) turnAngle -= 360;
-      while (turnAngle < -180) turnAngle += 360;
-
-      if (turnAngle > 25 && turnAngle <= 135) {
-        action = 'Turn right';
-        stepType = 'TURN';
-      } else if (turnAngle < -25 && turnAngle >= -135) {
-        action = 'Turn left';
-        stepType = 'TURN';
-      } else if (turnAngle > 135 || turnAngle < -135) {
-        action = 'Make a U-turn';
-        stepType = 'TURN';
-      }
-    }
-
-    rawSteps.push({ msg: action, dist: distMeters, type: stepType, targetNode: nodeB });
-  }
-
-  let condensedSteps: StepInstruction[] = [];
-
-  for (const step of rawSteps) {
-    if (condensedSteps.length === 0) {
-      condensedSteps.push({ msg: step.msg, dist: step.dist, targetNode: step.targetNode });
-      continue;
-    }
-
-    const prevStep = condensedSteps[condensedSteps.length - 1];
-
-    if (step.dist < 3 && step.type !== 'ARRIVE') {
-      prevStep.dist += step.dist;
-      prevStep.targetNode = step.targetNode;
-      continue;
-    }
-
-    const isPrevStraight = prevStep.msg.includes('straight') || prevStep.msg.includes('Head');
-    const isCurrStraight = step.type === 'STRAIGHT';
-
-    if (isPrevStraight && isCurrStraight) {
-      prevStep.dist += step.dist;
-      prevStep.targetNode = step.targetNode;
-    } else {
-      condensedSteps.push({ msg: step.msg, dist: step.dist, targetNode: step.targetNode });
-    }
+    rawSteps.push({ msg: 'Continue straight down the pathway', dist: distMeters, type: 'STRAIGHT', targetNode: nodeB });
   }
 
   return {
     pathString: pathNodes.map((n) => `${NODES[n].x},${NODES[n].y}`).join(' '),
-    directions: condensedSteps,
+    directions: rawSteps,
   };
 }

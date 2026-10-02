@@ -1,9 +1,7 @@
 // HomeScreen.tsx
 
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { ReactNativeZoomableView } from '@openspacelabs/react-native-zoomable-view';
 import * as Location from 'expo-location';
-import { Magnetometer } from 'expo-sensors';
 import * as Speech from 'expo-speech';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -17,7 +15,16 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import {
+  Gesture,
+  GestureDetector,
+  GestureHandlerRootView,
+} from 'react-native-gesture-handler';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, G, Polyline } from 'react-native-svg';
 
@@ -33,15 +40,15 @@ import {
   getDistanceInMeters,
 } from '../components/navigationUtils';
 
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
-const MAP_SIZE = 1200;
+const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
+const MAP_SIZE = 1200; 
 
 export default function HomeScreen() {
-  const [userPos, setUserPos] = useState({ x: 38.2, y: 81.2 });
+  const [userPos, setUserPos] = useState({ x: 50, y: 50 });
   const [activeRoute, setActiveRoute] = useState<string | null>(null);
+  const [isRouteActive, setIsRouteActive] = useState(false);
   const [directions, setDirections] = useState<StepInstruction[]>([]);
   const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
-  const [heading, setHeading] = useState(0);
   const [isVoiceMuted, setIsVoiceMuted] = useState(false);
 
   const [blockedNodes, setBlockedNodes] = useState<Set<string>>(new Set());
@@ -49,7 +56,28 @@ export default function HomeScreen() {
   const [isGuardModalVisible, setIsGuardModalVisible] = useState(false);
   const [isHazardManagerVisible, setIsHazardManagerVisible] = useState(false);
 
-  const prevHeading = useRef(0);
+  // Shared values for panning offsets and tracking touch state
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const contextX = useSharedValue(0);
+  const contextY = useSharedValue(0);
+
+  // Pan gesture: allows dragging to look around, then springs back to (0,0) when released
+  const panGesture = Gesture.Pan()
+    .onStart(() => {
+      contextX.value = translateX.value;
+      contextY.value = translateY.value;
+    })
+    .onUpdate((event) => {
+      translateX.value = contextX.value + event.translationX;
+      translateY.value = contextY.value + event.translationY;
+    })
+    .onEnd(() => {
+      // Snap back to normal centered position with smooth spring physics
+      translateX.value = withSpring(0, { damping: 20, stiffness: 150 });
+      translateY.value = withSpring(0, { damping: 20, stiffness: 150 });
+    });
+
   const directionsRef = useRef(directions);
   const stepIdxRef = useRef(currentStepIndex);
   const isMutedRef = useRef(isVoiceMuted);
@@ -89,14 +117,16 @@ export default function HomeScreen() {
 
           if (activeDirections.length > 0 && activeStepIdx < activeDirections.length) {
             const targetStep = activeDirections[activeStepIdx];
-            if (getDistanceInMeters(newPos, targetStep.targetNode) <= 5) {
+            const targetCoords = NODES[targetStep.targetNode as any] || targetStep.targetNode;
+
+            if (targetCoords && getDistanceInMeters(newPos, targetCoords) <= 3) {
               const nextIdx = activeStepIdx + 1;
               if (nextIdx < activeDirections.length) {
                 const nextStep = activeDirections[nextIdx];
                 speakInstruction(`In ${nextStep.dist} meters, ${nextStep.msg}`);
                 setCurrentStepIndex(nextIdx);
               } else {
-                speakInstruction('You have arrived at your destination.');
+                speakInstruction('You have arrived at the building exit.');
                 setCurrentStepIndex(activeDirections.length);
               }
             }
@@ -105,18 +135,8 @@ export default function HomeScreen() {
       );
     })();
 
-    const magSub = Magnetometer.addListener((data) => {
-      let angle = Math.atan2(data.y, data.x) * (180 / Math.PI);
-      let target = Math.round(angle < 0 ? angle + 360 : angle);
-      let smoothed = prevHeading.current + 0.2 * (target - prevHeading.current);
-      prevHeading.current = smoothed;
-      setHeading(Math.round(smoothed));
-    });
-    Magnetometer.setUpdateInterval(100);
-
     return () => {
       if (locationSub) locationSub.remove();
-      magSub.remove();
       Speech.stop();
     };
   }, []);
@@ -134,16 +154,18 @@ export default function HomeScreen() {
       speakInstruction(result.warningMessage);
       setActiveRoute(null);
       setDirections([]);
+      setIsRouteActive(false);
       return;
     }
 
     setDirections(result.directions);
     setCurrentStepIndex(0);
     setActiveRoute(result.pathString);
+    setIsRouteActive(true);
 
     if (result.directions.length > 0) {
       const firstStep = result.directions[0];
-      const prefix = isHazardRecalculation ? 'Fire alert! Route recalculated. ' : '';
+      const prefix = isHazardRecalculation ? 'Hazard alert! Indoor route recalculated. ' : '';
       speakInstruction(`${prefix}In ${firstStep.dist} meters, ${firstStep.msg.toLowerCase()}`);
     }
   };
@@ -160,39 +182,47 @@ export default function HomeScreen() {
     });
   };
 
+  // Animated map style handles centering the user and adding the smooth spring-back pan offset
+  const animatedMapStyle = useAnimatedStyle(() => {
+    const userPixelX = (userPos.x / 100) * MAP_SIZE;
+    const userPixelY = (userPos.y / 100) * MAP_SIZE;
+
+    const centerX = SCREEN_WIDTH / 2;
+    const centerY = SCREEN_HEIGHT * 0.40;
+
+    return {
+      transform: [
+        { translateX: centerX + translateX.value },
+        { translateY: centerY + translateY.value },
+        { translateX: -userPixelX },
+        { translateY: -userPixelY },
+      ],
+    };
+  }, [userPos]);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <View style={styles.container}>
-        <StatusBar barStyle="dark-content" />
+        <StatusBar barStyle="light-content" />
 
-        <View style={StyleSheet.absoluteFill}>
-          <ReactNativeZoomableView
-            maxZoom={4}
-            minZoom={0.5}
-            zoomStep={0.5}
-            initialZoom={1}
-            contentWidth={MAP_SIZE}
-            contentHeight={MAP_SIZE}
-            panEnabled={true}
-            zoomEnabled={true}
-            style={{ flex: 1 }}
-          >
-            <View style={styles.mapContainer}>
-              <UstMapSvg width="100%" height="100%" preserveAspectRatio="xMidYMid meet" />
+        {/* Pan Gesture Enabled Map View */}
+        <View style={styles.mapPerspectiveContainer}>
+          <GestureDetector gesture={panGesture}>
+            <Animated.View style={[styles.mapContainer, animatedMapStyle]}>
+              <UstMapSvg width={MAP_SIZE} height={MAP_SIZE} preserveAspectRatio="xMidYMid meet" />
 
               <Svg
-                height="100%"
-                width="100%"
+                height={MAP_SIZE}
+                width={MAP_SIZE}
                 viewBox="0 0 100 100"
-                preserveAspectRatio="xMidYMid meet"
                 style={styles.svgLayer}
                 pointerEvents="none"
               >
-                <G opacity="0.25" stroke="#EAB308" strokeWidth="0.4">
+                <G opacity="0.2" stroke="#EAB308" strokeWidth="0.1">
                   {EDGES.map((e, i) => (
                     <Polyline
                       key={i}
-                      points={`${NODES[e.from].x},${NODES[e.from].y} ${NODES[e.to].x},${NODES[e.to].y}`}
+                      points={`${NODES[e.from]?.x || 0},${NODES[e.from]?.y || 0} ${NODES[e.to]?.x || 0},${NODES[e.to]?.y || 0}`}
                     />
                   ))}
                 </G>
@@ -202,10 +232,10 @@ export default function HomeScreen() {
                     points={`${userPos.x},${userPos.y} ${activeRoute}`}
                     fill="none"
                     stroke="#FF3B30"
-                    strokeWidth="0.8"
+                    strokeWidth="0.4"
                     strokeLinejoin="round"
                     strokeLinecap="round"
-                    strokeDasharray="1.2,0.8"
+                    strokeDasharray="0.6,0.6"
                   />
                 )}
 
@@ -216,25 +246,29 @@ export default function HomeScreen() {
                       key={key}
                       cx={node.x}
                       cy={node.y}
-                      r="1.4"
+                      r="1.2"
                       fill="#FF3B30"
                       stroke="#FFF"
-                      strokeWidth="0.3"
+                      strokeWidth="0.2"
                     />
                   );
                 })}
-
-                <Circle
-                  cx={userPos.x}
-                  cy={userPos.y}
-                  r="1.2"
-                  fill="#007AFF"
-                  stroke="#fff"
-                  strokeWidth="0.3"
-                />
               </Svg>
-            </View>
-          </ReactNativeZoomableView>
+
+              <View 
+                style={[
+                  styles.userPointerWrapper, 
+                  { 
+                    left: (userPos.x / 100) * MAP_SIZE, 
+                    top: (userPos.y / 100) * MAP_SIZE,
+                  }
+                ]}
+              >
+                <View style={styles.userDotCore} />
+                <View style={styles.userConeGlow} />
+              </View>
+            </Animated.View>
+          </GestureDetector>
         </View>
 
         <SafeAreaView style={styles.headerWrapper} pointerEvents="box-none">
@@ -243,7 +277,7 @@ export default function HomeScreen() {
               <Text style={styles.brand}>
                 TOMA<Text style={{ color: '#EAB308' }}>SAFE</Text>
               </Text>
-              <Text style={styles.subText}>UST-LEGAZPI DISASTER NAV</Text>
+              <Text style={styles.subText}>INDOOR EXIT GUIDANCE</Text>
             </View>
 
             <View style={styles.headerActions}>
@@ -279,10 +313,6 @@ export default function HomeScreen() {
                   color={isVoiceMuted ? '#8E8E93' : '#007AFF'}
                 />
               </TouchableOpacity>
-
-              <View style={[styles.compass, { transform: [{ rotate: `${heading}deg` }] }]}>
-                <MaterialCommunityIcons name="navigation" size={20} color="#FF3B30" />
-              </View>
             </View>
           </View>
         </SafeAreaView>
@@ -295,7 +325,7 @@ export default function HomeScreen() {
             >
               <MaterialCommunityIcons name="fire" size={16} color="#FFF" />
               <Text style={styles.guardBannerText}>
-                GUARD MODE: MANAGE BLOCKED PATHS ({blockedNodes.size} ACTIVE)
+                GUARD MODE: BLOCKED CORRIDORS ({blockedNodes.size} ACTIVE)
               </Text>
             </TouchableOpacity>
           )}
@@ -306,8 +336,8 @@ export default function HomeScreen() {
           >
             <Text style={styles.btnText}>
               {blockedNodes.size > 0
-                ? 'CALCULATE SAFE EMERGENCY EXIT'
-                : 'CALCULATE NEAREST EXIT'}
+                ? 'CALCULATE SAFE INDOOR EXIT'
+                : 'FIND NEAREST BUILDING EXIT'}
             </Text>
           </TouchableOpacity>
 
@@ -344,9 +374,9 @@ export default function HomeScreen() {
             ) : (
               <View style={styles.emptyContainer}>
                 <Text style={styles.emptyText}>
-                  {blockedNodes.size > 0
-                    ? '⚠️ Fire alert on campus! Tap button to compute safest exit.'
-                    : 'Tap the button above to navigate to the nearest exit gate.'}
+                  {Object.keys(NODES).length === 0
+                    ? '⚠️ Please update navigationUtils.ts with your building map nodes.'
+                    : 'Tap the button above to view your indoor exit route.'}
                 </Text>
               </View>
             )}
@@ -360,7 +390,7 @@ export default function HomeScreen() {
           onAuthenticateSuccess={() => {
             setIsGuardMode(true);
             setIsHazardManagerVisible(true);
-            speakInstruction('Guard mode active. Open hazard manager to block paths.');
+            speakInstruction('Guard mode active. Open hazard manager to block corridors.');
           }}
           onDeactivateGuardMode={() => {
             setIsGuardMode(false);
@@ -380,7 +410,7 @@ export default function HomeScreen() {
               <View style={styles.sheetHeader}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <MaterialCommunityIcons name="fire" size={20} color="#FF3B30" />
-                  <Text style={styles.sheetTitle}>Manage Blocked Campus Paths</Text>
+                  <Text style={styles.sheetTitle}>Manage Indoor Corridor Hazards</Text>
                 </View>
 
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
@@ -403,7 +433,7 @@ export default function HomeScreen() {
               </View>
 
               <Text style={styles.sheetSub}>
-                Toggle any path node below to declare or clear a fire hazard. Student routes will automatically update to avoid blocked areas.
+                Toggle indoor nodes below to mark hallway blockages. Emergency exit routes will automatically reroute around blocked paths.
               </Text>
 
               <ScrollView style={{ maxHeight: 350 }}>
@@ -414,7 +444,7 @@ export default function HomeScreen() {
                       <View>
                         <Text style={styles.nodeTitle}>{node.name}</Text>
                         <Text style={styles.nodePosSub}>
-                          {node.isExit ? 'Exit Gate' : 'Campus Walkway Node'}
+                          {node.isAssembly ? 'Building Exit / Assembly' : 'Indoor Hallway Node'}
                         </Text>
                       </View>
                       <Switch
@@ -436,141 +466,44 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
-  mapContainer: { width: MAP_SIZE, height: MAP_SIZE, position: 'relative' },
+  container: { flex: 1, backgroundColor: '#0f172a' },
+  mapPerspectiveContainer: { flex: 1, overflow: 'hidden', backgroundColor: '#0f172a' },
+  mapContainer: { width: MAP_SIZE, height: MAP_SIZE, position: 'absolute', top: 0, left: 0 },
   svgLayer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-
+  userPointerWrapper: { position: 'absolute', width: 28, height: 28, marginLeft: -14, marginTop: -14, justifyContent: 'center', alignItems: 'center', zIndex: 99 },
+  userDotCore: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#007AFF', borderWidth: 2.5, borderColor: '#FFFFFF', elevation: 6 },
+  userConeGlow: { position: 'absolute', width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0, 122, 255, 0.35)' },
   headerWrapper: { position: 'absolute', top: 10, left: 0, right: 0, zIndex: 10 },
-  headerCard: {
-    marginHorizontal: 16,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 18,
-    elevation: 8,
-  },
-  brand: { fontSize: 20, fontWeight: '900', color: '#1C1C1E' },
-  subText: { fontSize: 8, fontWeight: '700', color: '#8E8E93', letterSpacing: 1 },
+  headerCard: { marginHorizontal: 16, paddingHorizontal: 18, paddingVertical: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(15, 23, 42, 0.90)', borderRadius: 18, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)', elevation: 8 },
+  brand: { fontSize: 20, fontWeight: '900', color: '#FFFFFF' },
+  subText: { fontSize: 8, fontWeight: '700', color: '#94A3B8', letterSpacing: 1 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  iconBtn: {
-    width: 34,
-    height: 34,
-    backgroundColor: '#F2F2F7',
-    borderRadius: 17,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  compass: {
-    width: 34,
-    height: 34,
-    backgroundColor: '#F2F2F7',
-    borderRadius: 17,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  bottomPanel: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: SCREEN_HEIGHT * 0.25,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 8,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    elevation: 20,
-    zIndex: 10,
-  },
-
-  guardBannerBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FF3B30',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    marginBottom: 8,
-    gap: 6,
-  },
+  iconBtn: { width: 34, height: 34, backgroundColor: '#1E293B', borderRadius: 17, justifyContent: 'center', alignItems: 'center' },
+  bottomPanel: { position: 'absolute', bottom: 0, left: 0, right: 0, height: SCREEN_HEIGHT * 0.25, backgroundColor: '#1E293B', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, borderTopLeftRadius: 24, borderTopRightRadius: 24, elevation: 20, zIndex: 10, borderTopWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)' },
+  guardBannerBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#FF3B30', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, marginBottom: 8, gap: 6 },
   guardBannerText: { color: '#FFF', fontSize: 10, fontWeight: '900' },
-
-  btn: {
-    backgroundColor: '#1C1C1E',
-    paddingVertical: 14,
-    borderRadius: 14,
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  emergencyBtn: { backgroundColor: '#FF3B30' },
+  btn: { backgroundColor: '#0F172A', paddingVertical: 14, borderRadius: 14, alignItems: 'center', marginBottom: 10, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.15)' },
+  emergencyBtn: { backgroundColor: '#FF3B30', borderColor: '#FF3B30' },
   btnText: { color: '#fff', fontWeight: '900', fontSize: 12 },
-
   stepScroller: { flex: 1 },
-  stepItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-    padding: 8,
-    borderRadius: 10,
-  },
-  activeStepItem: { backgroundColor: '#F2F2F7' },
-  stepNum: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: '#EAB308',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 10,
-  },
+  stepItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, padding: 8, borderRadius: 10 },
+  activeStepItem: { backgroundColor: '#0F172A' },
+  stepNum: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#EAB308', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
   activeStepNum: { backgroundColor: '#007AFF' },
   stepNumText: { fontSize: 10, fontWeight: '900', color: '#000' },
   activeStepNumText: { color: '#FFF' },
-  stepMain: { fontSize: 12, fontWeight: '700', color: '#1C1C1E' },
-  activeStepMain: { color: '#007AFF' },
-  stepSub: { fontSize: 10, color: '#8E8E93' },
+  stepMain: { fontSize: 12, fontWeight: '700', color: '#F1F5F9' },
+  activeStepMain: { color: '#38BDF8' },
+  stepSub: { fontSize: 10, color: '#94A3B8' },
   emptyContainer: { alignItems: 'center', paddingVertical: 10 },
-  emptyText: {
-    color: '#8E8E93',
-    fontSize: 11,
-    fontStyle: 'italic',
-    textAlign: 'center',
-  },
-
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  hazardSheet: {
-    backgroundColor: '#FFFFFF',
-    padding: 20,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-  },
-  sheetHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  sheetTitle: { fontSize: 16, fontWeight: '900', color: '#1C1C1E' },
-  sheetSub: { fontSize: 11, color: '#8E8E93', marginBottom: 14 },
-  closeBtnText: { fontSize: 14, fontWeight: '800', color: '#007AFF' },
-  hazardRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#E5E5EA',
-  },
-  nodeTitle: { fontSize: 13, fontWeight: '800', color: '#1C1C1E' },
-  nodePosSub: { fontSize: 10, color: '#8E8E93' },
+  emptyText: { color: '#94A3B8', fontSize: 11, fontStyle: 'italic', textAlign: 'center' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  hazardSheet: { backgroundColor: '#1E293B', padding: 20, borderTopLeftRadius: 24, borderTopRightRadius: 24 },
+  sheetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  sheetTitle: { fontSize: 16, fontWeight: '900', color: '#FFFFFF' },
+  sheetSub: { fontSize: 11, color: '#94A3B8', marginBottom: 14 },
+  closeBtnText: { fontSize: 14, fontWeight: '800', color: '#38BDF8' },
+  hazardRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 0.5, borderBottomColor: 'rgba(255, 255, 255, 0.1)' },
+  nodeTitle: { fontSize: 13, fontWeight: '800', color: '#FFFFFF' },
+  nodePosSub: { fontSize: 10, color: '#94A3B8' },
 });
