@@ -1,6 +1,40 @@
 // navigationUtils.ts
+//
+// Outdoor-only navigation version.
+// Indoor room, door, hallway, and Angelico test nodes are temporarily removed.
 
-export type Node = { x: number; y: number; name: string; isAssembly?: boolean };
+export type MapPoint = {
+  x: number;
+  y: number;
+};
+
+export type Node = {
+  x: number;
+  y: number;
+  name: string;
+  isExit?: boolean;
+};
+
+export type Edge = {
+  from: string;
+  to: string;
+};
+
+export type RouteResult =
+  | {
+      success: true;
+      startNodeId: string;
+      exitNodeId: string;
+      exitName: string;
+      distance: number;
+      path: string[];
+      points: MapPoint[];
+      pathString: string;
+    }
+  | {
+      success: false;
+      message: string;
+    };
 
 export const CAMPUS_LIMITS = {
   north: 13.165857,
@@ -9,233 +43,343 @@ export const CAMPUS_LIMITS = {
   east: 123.751555,
 };
 
-// 1. Define the exact corner-to-corner perimeter of your primary evacuation area
-export const EVACUATION_POLYGON = [
-  { x: 42.7, y: 72.1 }, // NODE_1
-  { x: 30.3, y: 72.1 }, // NODE_2
-  { x: 30.0, y: 58.1 }, // NODE_3
-  { x: 33.2, y: 54.4 }, // NODE_4
-  { x: 43.3, y: 54.4 }, // NODE_5
-  { x: 42.8, y: 71.8 }, // NODE_6
-];
+// Add only OUTDOOR path nodes here later.
+export const NODES: Record<string, Node> = {};
 
-// 2. Define the second evacuation area perimeter for Building 3 (non-overlapping unique keys)
-export const EVACUATION_POLYGON_2 = [
-  { x: 63.1, y: 65.5 }, // EVAC2_NODE_1
-  { x: 49.5, y: 64.8 }, // EVAC2_NODE_2
-  { x: 49.7, y: 60.8 }, // EVAC2_NODE_3
-  { x: 63.1, y: 61.7 }, // EVAC2_NODE_4
-  { x: 63.1, y: 65.2 }, // EVAC2_NODE_5
-];
+// Add only OUTDOOR path edges here later.
+export const EDGES: Edge[] = [];
 
-export const NODES: Record<string, Node> = {
-  // Your original area routes
-  NODE_0: { x: 46.7, y: 76, name: "DOME" },
-  NODE_1: { x: 59.2, y: 79.8, name: "PAVILION" },
-  NODE_2: { x: 42.6, y: 72.2, name: "ASSEMBLY POINT", isAssembly: true },
-  NODE_3: { x: 42.9, y: 70.9, name: "ASSEMBLY POINT", isAssembly: true },
+export function gpsToMapPosition(
+  latitude: number,
+  longitude: number
+) {
+  const x =
+    ((longitude - CAMPUS_LIMITS.west) /
+      (CAMPUS_LIMITS.east - CAMPUS_LIMITS.west)) *
+    100;
 
-  // Your previously added separate route nodes
-  NEW_NODE_1: { x: 34.1, y: 80.6, name: "NEW_AREA_NODE_1" },
-  NEW_NODE_2: { x: 34.2, y: 72.4, name: "ASSEMBLY POINT", isAssembly: true },
+  const y =
+    ((CAMPUS_LIMITS.north - latitude) /
+      (CAMPUS_LIMITS.north - CAMPUS_LIMITS.south)) *
+    100;
 
-  // Sequential nodes for Building 2
-  BLDG2_NODE_1: { x: 59.7, y: 66.6, name: "BLDG2_NODE_1" },
-  BLDG2_NODE_2: { x: 56.5, y: 66.6, name: "BLDG2_NODE_2" },
-  BLDG2_NODE_3: { x: 53.5, y: 66.5, name: "BLDG2_NODE_3" },
-  BLDG2_NODE_4: { x: 50.2, y: 66.4, name: "BLDG2_NODE_4" },
-  BLDG2_NODE_5: { x: 47.1, y: 66.3, name: "BLDG2_NODE_5" },
-  BLDG2_NODE_6: { x: 43.2, y: 66.1, name: "BLDG2_NODE_6", isAssembly: true },
+  const isInsideCampus =
+    x >= 0 &&
+    x <= 100 &&
+    y >= 0 &&
+    y <= 100;
 
-  // Sequential nodes for Building 3
-  BLDG3_NODE_1: { x: 75.5, y: 67.8, name: "BLDG3_NODE_1" },
-  BLDG3_NODE_2: { x: 72.2, y: 67.6, name: "BLDG3_NODE_2" },
-  BLDG3_NODE_3: { x: 69.1, y: 67.6, name: "BLDG3_NODE_3" },
-  BLDG3_NODE_4: { x: 66, y: 67.4, name: "BLDG3_NODE_4" },
-  BLDG3_NODE_5: { x: 63, y: 67.3, name: "BLDG3_NODE_5" },
-  BLDG3_NODE_6: { x: 61.1, y: 65.4, name: "ASSEMBLY POINT", isAssembly: true },
-
-};
-
-export const RAW_EDGES = [
-  // Original edgess
-  { from: 'NODE_0', to: 'NODE_2' },
-  { from: 'NODE_1', to: 'NODE_3' },
-
-  // New edges for the separate route
-  { from: 'NEW_NODE_1', to: 'NEW_NODE_2' },
-
-  // Sequential edges for Building 2
-  { from: 'BLDG2_NODE_1', to: 'BLDG2_NODE_2' },
-  { from: 'BLDG2_NODE_2', to: 'BLDG2_NODE_3' },
-  { from: 'BLDG2_NODE_3', to: 'BLDG2_NODE_4' },
-  { from: 'BLDG2_NODE_4', to: 'BLDG2_NODE_5' },
-  { from: 'BLDG2_NODE_5', to: 'BLDG2_NODE_6' },
-
-  // Sequential edges for Building 3
-  { from: 'BLDG3_NODE_1', to: 'BLDG3_NODE_2' },
-  { from: 'BLDG3_NODE_2', to: 'BLDG3_NODE_3' },
-  { from: 'BLDG3_NODE_3', to: 'BLDG3_NODE_4' },
-  { from: 'BLDG3_NODE_4', to: 'BLDG3_NODE_5' },
-  { from: 'BLDG3_NODE_5', to: 'BLDG3_NODE_6' },
-];
-
-export const getDistanceInMeters = (
-  p1: { x: number; y: number },
-  p2: { x: number; y: number }
-) => {
-  const lat1 = CAMPUS_LIMITS.north - (p1.y / 100) * (CAMPUS_LIMITS.north - CAMPUS_LIMITS.south);
-  const lng1 = CAMPUS_LIMITS.west + (p1.x / 100) * (CAMPUS_LIMITS.east - CAMPUS_LIMITS.west);
-  const lat2 = CAMPUS_LIMITS.north - (p2.y / 100) * (CAMPUS_LIMITS.north - CAMPUS_LIMITS.south);
-  const lng2 = CAMPUS_LIMITS.west + (p2.x / 100) * (CAMPUS_LIMITS.east - CAMPUS_LIMITS.west);
-
-  const R = 6371000;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) *
-      Math.sin(dLng / 2);
-
-  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
-};
-
-export const EDGES = RAW_EDGES.map((e) => ({
-  ...e,
-  weight: getDistanceInMeters(NODES[e.from], NODES[e.to]),
-}));
-
-export interface StepInstruction {
-  msg: string;
-  dist: number;
-  targetNode: Node;
+  return {
+    x,
+    y,
+    isInsideCampus,
+  };
 }
 
-// Ray-casting algorithm: checks if user is anywhere inside a given polygon boundary
-function isPointInsidePolygon(point: { x: number; y: number }, polygon: { x: number; y: number }[]) {
-  let x = point.x, y = point.y;
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    let xi = polygon[i].x, yi = polygon[i].y;
-    let xj = polygon[j].x, yj = polygon[j].y;
-    
-    let intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
-    if (intersect) inside = !inside;
-  }
-  return inside;
+export function getMapDistance(
+  a: MapPoint,
+  b: MapPoint
+) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+
+  return Math.sqrt(dx * dx + dy * dy);
 }
 
-export function calculateShortestPath(
-  userPos: { x: number; y: number },
-  blockedNodes: Set<string>
-): {
-  pathString: string | null;
-  directions: StepInstruction[];
-  warningMessage?: string;
-} {
-  // If the user steps anywhere inside either evacuation polygon boundary, instantly clear route & trigger arrival
-  if (isPointInsidePolygon(userPos, EVACUATION_POLYGON) || isPointInsidePolygon(userPos, EVACUATION_POLYGON_2)) {
-    return {
-      pathString: null,
-      directions: [
-        {
-          msg: `You have safely arrived at the evacuation zone.`,
-          dist: 0,
-          targetNode: NODES.NODE_2,
-        },
-      ],
-    };
+function mapPositionToGps(point: MapPoint) {
+  const longitude =
+    CAMPUS_LIMITS.west +
+    (point.x / 100) *
+      (CAMPUS_LIMITS.east - CAMPUS_LIMITS.west);
+
+  const latitude =
+    CAMPUS_LIMITS.north -
+    (point.y / 100) *
+      (CAMPUS_LIMITS.north - CAMPUS_LIMITS.south);
+
+  return {
+    latitude,
+    longitude,
+  };
+}
+
+export function getDistanceInMeters(
+  a: MapPoint,
+  b: MapPoint
+) {
+  const gpsA = mapPositionToGps(a);
+  const gpsB = mapPositionToGps(b);
+
+  const earthRadius = 6371000;
+  const toRadians = (value: number) =>
+    (value * Math.PI) / 180;
+
+  const lat1 = toRadians(gpsA.latitude);
+  const lat2 = toRadians(gpsB.latitude);
+
+  const deltaLat = toRadians(
+    gpsB.latitude - gpsA.latitude
+  );
+
+  const deltaLon = toRadians(
+    gpsB.longitude - gpsA.longitude
+  );
+
+  const haversine =
+    Math.sin(deltaLat / 2) ** 2 +
+    Math.cos(lat1) *
+      Math.cos(lat2) *
+      Math.sin(deltaLon / 2) ** 2;
+
+  const angularDistance =
+    2 *
+    Math.atan2(
+      Math.sqrt(haversine),
+      Math.sqrt(1 - haversine)
+    );
+
+  return earthRadius * angularDistance;
+}
+
+export function findNearestNode(
+  point: MapPoint
+) {
+  let nearestNodeId: string | null = null;
+  let nearestDistance = Infinity;
+
+  for (const [nodeId, node] of Object.entries(NODES)) {
+    const distance = getMapDistance(point, node);
+
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestNodeId = nodeId;
+    }
   }
 
-  const activeAssemblies = Object.keys(NODES).filter((n) => NODES[n].isAssembly && !blockedNodes.has(n));
+  return nearestNodeId;
+}
 
-  if (activeAssemblies.length === 0) {
-    return {
-      pathString: null,
-      directions: [],
-      warningMessage: 'Warning! All assembly areas are currently blocked.',
-    };
+function getNeighbors(nodeId: string) {
+  const currentNode = NODES[nodeId];
+
+  if (!currentNode) {
+    return [];
   }
 
-  const startNodeId = Object.keys(NODES).reduce((prev, curr) => {
-    const dP = Math.hypot(NODES[prev].x - userPos.x, NODES[prev].y - userPos.y);
-    const dC = Math.hypot(NODES[curr].x - userPos.x, NODES[curr].y - userPos.y);
-    return dC < dP ? curr : prev;
-  });
+  const neighbors: {
+    id: string;
+    distance: number;
+  }[] = [];
 
-  let distances: Record<string, number> = {};
-  let prev: Record<string, string | null> = {};
-  let pq = new Set(Object.keys(NODES));
+  for (const edge of EDGES) {
+    let neighborId: string | null = null;
 
-  Object.keys(NODES).forEach((n) => {
-    distances[n] = Infinity;
-    prev[n] = null;
-  });
-  distances[startNodeId] = 0;
+    if (edge.from === nodeId) {
+      neighborId = edge.to;
+    } else if (edge.to === nodeId) {
+      neighborId = edge.from;
+    }
 
-  while (pq.size > 0) {
-    let curr = [...pq].reduce((min, n) => (distances[n] < distances[min] ? n : min));
-    pq.delete(curr);
+    if (!neighborId) {
+      continue;
+    }
 
-    if (distances[curr] === Infinity) break;
-    if (blockedNodes.has(curr)) continue;
+    const neighborNode = NODES[neighborId];
 
-    EDGES.forEach((e) => {
-      if (blockedNodes.has(e.from) || blockedNodes.has(e.to)) return;
+    if (!neighborNode) {
+      continue;
+    }
 
-      if (e.from === curr || e.to === curr) {
-        let neighbor = e.from === curr ? e.to : e.from;
-        if (pq.has(neighbor) && !blockedNodes.has(neighbor)) {
-          let alt = distances[curr] + e.weight;
-          if (alt < distances[neighbor]) {
-            distances[neighbor] = alt;
-            prev[neighbor] = curr;
-          }
-        }
-      }
+    neighbors.push({
+      id: neighborId,
+      distance: getDistanceInMeters(
+        currentNode,
+        neighborNode
+      ),
     });
   }
 
-  const destinationId = activeAssemblies.reduce((best, assembly) => 
-    (distances[assembly] < distances[best] ? assembly : best)
-  );
+  return neighbors;
+}
 
-  if (distances[destinationId] === Infinity) {
-    return {
-      pathString: null,
-      directions: [],
-      warningMessage: 'Warning! All routes to safe assembly zones are currently blocked by hazards.',
-    };
+function dijkstra(
+  startNodeId: string,
+  endNodeId: string
+) {
+  const distances: Record<string, number> = {};
+  const previous: Record<string, string | null> = {};
+  const unvisited = new Set(Object.keys(NODES));
+
+  for (const nodeId of Object.keys(NODES)) {
+    distances[nodeId] = Infinity;
+    previous[nodeId] = null;
   }
 
-  let pathNodes: string[] = [];
-  let currNode: string | null = destinationId;
+  distances[startNodeId] = 0;
 
-  while (currNode) {
-    pathNodes.unshift(currNode);
-    currNode = prev[currNode];
-  }
+  while (unvisited.size > 0) {
+    let currentNodeId: string | null = null;
+    let smallestDistance = Infinity;
 
-  let rawSteps: { msg: string; dist: number; type: 'STRAIGHT' | 'TURN' | 'ARRIVE'; targetNode: Node }[] = [];
+    for (const nodeId of unvisited) {
+      if (distances[nodeId] < smallestDistance) {
+        smallestDistance = distances[nodeId];
+        currentNodeId = nodeId;
+      }
+    }
 
-  for (let i = 0; i < pathNodes.length - 1; i++) {
-    const nodeA = NODES[pathNodes[i]];
-    const nodeB = NODES[pathNodes[i + 1]];
-    const distMeters = Math.round(getDistanceInMeters(nodeA, nodeB));
-
-    if (i === pathNodes.length - 2) {
-      rawSteps.push({ msg: `Arrive safely at ${nodeB.name}`, dist: distMeters, type: 'ARRIVE', targetNode: nodeB });
+    if (
+      currentNodeId === null ||
+      smallestDistance === Infinity
+    ) {
       break;
     }
 
-    rawSteps.push({ msg: 'Continue straight down the pathway', dist: distMeters, type: 'STRAIGHT', targetNode: nodeB });
+    if (currentNodeId === endNodeId) {
+      break;
+    }
+
+    unvisited.delete(currentNodeId);
+
+    for (const neighbor of getNeighbors(currentNodeId)) {
+      if (!unvisited.has(neighbor.id)) {
+        continue;
+      }
+
+      const candidateDistance =
+        distances[currentNodeId] +
+        neighbor.distance;
+
+      if (
+        candidateDistance <
+        distances[neighbor.id]
+      ) {
+        distances[neighbor.id] =
+          candidateDistance;
+
+        previous[neighbor.id] =
+          currentNodeId;
+      }
+    }
+  }
+
+  if (distances[endNodeId] === Infinity) {
+    return null;
+  }
+
+  const path: string[] = [];
+  let current: string | null = endNodeId;
+
+  while (current) {
+    path.unshift(current);
+    current = previous[current];
   }
 
   return {
-    pathString: pathNodes.map((n) => `${NODES[n].x},${NODES[n].y}`).join(' '),
-    directions: rawSteps,
+    path,
+    distance: distances[endNodeId],
   };
+}
+
+export function calculateNearestExit(
+  userPosition: MapPoint
+): RouteResult {
+  if (
+    Object.keys(NODES).length === 0 ||
+    EDGES.length === 0
+  ) {
+    return {
+      success: false,
+      message:
+        'Outdoor navigation nodes have not been added yet.',
+    };
+  }
+
+  const startNodeId =
+    findNearestNode(userPosition);
+
+  if (!startNodeId) {
+    return {
+      success: false,
+      message:
+        'Could not find a nearby outdoor navigation node.',
+    };
+  }
+
+  const exitIds = Object.entries(NODES)
+    .filter(([, node]) => node.isExit)
+    .map(([nodeId]) => nodeId);
+
+  if (exitIds.length === 0) {
+    return {
+      success: false,
+      message:
+        'No outdoor exit nodes have been defined yet.',
+    };
+  }
+
+  let bestRoute:
+    | {
+        exitNodeId: string;
+        distance: number;
+        path: string[];
+      }
+    | null = null;
+
+  for (const exitNodeId of exitIds) {
+    const result = dijkstra(
+      startNodeId,
+      exitNodeId
+    );
+
+    if (!result) {
+      continue;
+    }
+
+    if (
+      !bestRoute ||
+      result.distance < bestRoute.distance
+    ) {
+      bestRoute = {
+        exitNodeId,
+        distance: result.distance,
+        path: result.path,
+      };
+    }
+  }
+
+  if (!bestRoute) {
+    return {
+      success: false,
+      message:
+        'No reachable outdoor exit was found.',
+    };
+  }
+
+  const points: MapPoint[] = [
+    userPosition,
+    ...bestRoute.path.map(nodeId => ({
+      x: NODES[nodeId].x,
+      y: NODES[nodeId].y,
+    })),
+  ];
+
+  return {
+    success: true,
+    startNodeId,
+    exitNodeId: bestRoute.exitNodeId,
+    exitName: NODES[bestRoute.exitNodeId].name,
+    distance: bestRoute.distance,
+    path: bestRoute.path,
+    points,
+    pathString: points
+      .map(point => `${point.x},${point.y}`)
+      .join(' '),
+  };
+}
+
+export function calculateShortestPath(
+  userPosition: MapPoint
+): RouteResult {
+  return calculateNearestExit(userPosition);
 }

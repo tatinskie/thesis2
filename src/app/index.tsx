@@ -1,509 +1,3419 @@
-// HomeScreen.tsx
-
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+
 import * as Location from 'expo-location';
-import * as Speech from 'expo-speech';
-import { useEffect, useRef, useState } from 'react';
+
+import { useEffect, useState } from 'react';
+
 import {
+  Alert,
+
   Dimensions,
-  Modal,
-  ScrollView,
+
   StatusBar,
+
   StyleSheet,
-  Switch,
+
   Text,
+
   TouchableOpacity,
+
   View,
 } from 'react-native';
+
 import {
   Gesture,
+
   GestureDetector,
+
   GestureHandlerRootView,
 } from 'react-native-gesture-handler';
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-} from 'react-native-reanimated';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Circle, G, Polyline } from 'react-native-svg';
 
-// @ts-expect-error Expo SVG Transformer runtime module
+import Animated, {
+  runOnJS,
+
+  useAnimatedStyle,
+
+  useSharedValue,
+
+  withSpring,
+
+  withTiming,
+} from 'react-native-reanimated';
+
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+import Svg, { Polyline } from 'react-native-svg';
+
 import UstMapSvg from '../../assets/images/ust.svg';
-import GuardAuthModal from '../components/GuardAuthModal';
+
+import BuildingLabels from '../components/BuildingLabels';
+
+import CampusContext from '../components/CampusContext';
+
+import CampusFadeOverlay from '../components/CampusFadeOverlay';
+
+import EvacuationAreas from '../components/evacuationAreas';
+
 import {
-  CAMPUS_LIMITS,
-  EDGES,
-  NODES,
-  StepInstruction,
   calculateShortestPath,
-  getDistanceInMeters,
+
+  gpsToMapPosition,
+
+  RouteResult,
 } from '../components/navigationUtils';
 
-const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
-const MAP_SIZE = 1200; 
+// =========================================================
+
+// CONSTANTS
+
+// =========================================================
+
+const {
+
+  height: SCREEN_HEIGHT,
+
+  width: SCREEN_WIDTH,
+
+} = Dimensions.get('window');
+
+const MAP_SIZE = 1200;
+
+// The outside context is 1200x1200 while the real UST map is 800x800.
+// That makes the visual context 1.5x larger than the navigation map.
+const CONTEXT_SCALE = 1200 / 800;
+const CONTEXT_SIZE = MAP_SIZE * CONTEXT_SCALE;
+
+const MIN_ZOOM = 0.22;
+
+const MAX_ZOOM = 4;
+
+const DEFAULT_VIEWPORT_WIDTH = SCREEN_WIDTH;
+
+const DEFAULT_VIEWPORT_HEIGHT = SCREEN_HEIGHT;
+
+// =========================================================
+
+// HOME SCREEN
+
+// =========================================================
 
 export default function HomeScreen() {
-  const [userPos, setUserPos] = useState({ x: 50, y: 50 });
-  const [activeRoute, setActiveRoute] = useState<string | null>(null);
-  const [isRouteActive, setIsRouteActive] = useState(false);
-  const [directions, setDirections] = useState<StepInstruction[]>([]);
-  const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
-  const [isVoiceMuted, setIsVoiceMuted] = useState(false);
 
-  const [blockedNodes, setBlockedNodes] = useState<Set<string>>(new Set());
-  const [isGuardMode, setIsGuardMode] = useState(false);
-  const [isGuardModalVisible, setIsGuardModalVisible] = useState(false);
-  const [isHazardManagerVisible, setIsHazardManagerVisible] = useState(false);
+  // Use the actual visible map area so centering behaves consistently
 
-  // Shared values for panning offsets and tracking touch state
-  const translateX = useSharedValue(0);
-  const translateY = useSharedValue(0);
-  const contextX = useSharedValue(0);
-  const contextY = useSharedValue(0);
+  // across phones with different screen sizes/aspect ratios.
 
-  // Pan gesture: allows dragging to look around, then springs back to (0,0) when released
-  const panGesture = Gesture.Pan()
-    .onStart(() => {
-      contextX.value = translateX.value;
-      contextY.value = translateY.value;
-    })
-    .onUpdate((event) => {
-      translateX.value = contextX.value + event.translationX;
-      translateY.value = contextY.value + event.translationY;
-    })
-    .onEnd(() => {
-      // Snap back to normal centered position with smooth spring physics
-      translateX.value = withSpring(0, { damping: 20, stiffness: 150 });
-      translateY.value = withSpring(0, { damping: 20, stiffness: 150 });
-    });
+  const [viewportSize, setViewportSize] = useState({
 
-  const directionsRef = useRef(directions);
-  const stepIdxRef = useRef(currentStepIndex);
-  const isMutedRef = useRef(isVoiceMuted);
+    width: DEFAULT_VIEWPORT_WIDTH,
 
-  useEffect(() => { directionsRef.current = directions; }, [directions]);
-  useEffect(() => { stepIdxRef.current = currentStepIndex; }, [currentStepIndex]);
-  useEffect(() => { isMutedRef.current = isVoiceMuted; }, [isVoiceMuted]);
+    height: DEFAULT_VIEWPORT_HEIGHT,
 
-  const speakInstruction = (text: string) => {
-    if (isMutedRef.current) return;
-    Speech.stop();
-    Speech.speak(text, { language: 'en-US', pitch: 1.0, rate: 0.95 });
-  };
+  });
+
+  // =======================================================
+
+  // GPS POSITION
+
+  // =======================================================
+
+  const [
+
+    userPos,
+
+    setUserPos,
+
+  ] = useState({
+
+    x: 50,
+
+    y: 50,
+
+  });
+
+  const [
+
+    locationGranted,
+
+    setLocationGranted,
+
+  ] = useState(false);
+
+  const [
+
+    isInsideCampus,
+
+    setIsInsideCampus,
+
+  ] = useState(false);
+
+  const [
+
+    locationAccuracy,
+
+    setLocationAccuracy,
+
+  ] = useState<
+
+    number | null
+
+  >(null);
+
+  const [
+
+    isWaitingForLocation,
+
+    setIsWaitingForLocation,
+
+  ] = useState(true);
+
+  // =======================================================
+
+  // NAVIGATION
+
+  // =======================================================
+
+  const [
+
+    activeRoute,
+
+    setActiveRoute,
+
+  ] = useState<
+
+    RouteResult | null
+
+  >(null);
+
+  const [
+
+  selectedEvacuationAreaId,
+
+  setSelectedEvacuationAreaId,
+
+] = useState<string | null>(null);
+
+  // =======================================================
+
+  // MAP PAN
+
+  // =======================================================
+
+  const translateX =
+
+    useSharedValue(0);
+
+  const translateY =
+
+    useSharedValue(0);
+
+  const savedTranslateX =
+
+    useSharedValue(0);
+
+  const savedTranslateY =
+
+    useSharedValue(0);
+
+  // =======================================================
+
+  // MAP ZOOM
+
+  // =======================================================
+
+  const scale =
+
+    useSharedValue(1);
+
+  const savedScale =
+
+    useSharedValue(1);
+
+  const pinchStartX =
+
+    useSharedValue(0);
+
+  const pinchStartY =
+
+    useSharedValue(0);
+
+  const pinchStartTranslateX =
+
+    useSharedValue(0);
+
+  const pinchStartTranslateY =
+
+    useSharedValue(0);
+
+  const [
+
+    zoomDisplay,
+
+    setZoomDisplay,
+
+  ] = useState(1);
+
+  // =======================================================
+
+  // SMOOTH MARKER
+
+  // =======================================================
+
+  const markerX =
+
+    useSharedValue(50);
+
+  const markerY =
+
+    useSharedValue(50);
+
+  // =======================================================
+
+  // GPS TRACKING
+
+  // =======================================================
 
   useEffect(() => {
-    let locationSub: Location.LocationSubscription | null = null;
 
-    (async () => {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
+    let subscription:
 
-      locationSub = await Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.High, distanceInterval: 1 },
-        (location) => {
-          const { latitude, longitude } = location.coords;
-          let x = ((longitude - CAMPUS_LIMITS.west) / (CAMPUS_LIMITS.east - CAMPUS_LIMITS.west)) * 100;
-          let y = ((CAMPUS_LIMITS.north - latitude) / (CAMPUS_LIMITS.north - CAMPUS_LIMITS.south)) * 100;
+      Location.LocationSubscription
 
-          const newPos = {
-            x: Math.max(0, Math.min(100, x)),
-            y: Math.max(0, Math.min(100, y)),
-          };
-          setUserPos(newPos);
+      | null = null;
 
-          const activeDirections = directionsRef.current;
-          const activeStepIdx = stepIdxRef.current;
+    const startLocation =
 
-          if (activeDirections.length > 0 && activeStepIdx < activeDirections.length) {
-            const targetStep = activeDirections[activeStepIdx];
-            const targetCoords = NODES[targetStep.targetNode as any] || targetStep.targetNode;
+      async () => {
 
-            if (targetCoords && getDistanceInMeters(newPos, targetCoords) <= 3) {
-              const nextIdx = activeStepIdx + 1;
-              if (nextIdx < activeDirections.length) {
-                const nextStep = activeDirections[nextIdx];
-                speakInstruction(`In ${nextStep.dist} meters, ${nextStep.msg}`);
-                setCurrentStepIndex(nextIdx);
-              } else {
-                speakInstruction('You have arrived at the building exit.');
-                setCurrentStepIndex(activeDirections.length);
-              }
-            }
+        try {
+
+          const permission =
+
+            await Location
+
+              .requestForegroundPermissionsAsync();
+
+          if (
+
+            permission.status !==
+
+            'granted'
+
+          ) {
+
+            setLocationGranted(
+
+              false
+
+            );
+
+            setIsWaitingForLocation(
+
+              false
+
+            );
+
+            return;
+
           }
+
+          setLocationGranted(
+
+            true
+
+          );
+
+          subscription =
+
+            await Location
+
+              .watchPositionAsync(
+
+                {
+
+                  accuracy:
+
+                    Location
+
+                      .Accuracy
+
+                      .High,
+
+                  distanceInterval:
+
+                    1,
+
+                  timeInterval:
+
+                    1000,
+
+                },
+
+                (location) => {
+
+                  const {
+
+                    latitude,
+
+                    longitude,
+
+                    accuracy,
+
+                  } =
+
+                    location.coords;
+
+                  setLocationAccuracy(
+
+                    accuracy ??
+
+                    null
+
+                  );
+
+                  setIsWaitingForLocation(
+
+                    false
+
+                  );
+
+                  // -------------------------------
+
+                  // GPS -> SVG
+
+                  // -------------------------------
+
+                  const position =
+
+                    gpsToMapPosition(
+
+                      latitude,
+
+                      longitude
+
+                    );
+
+                  setIsInsideCampus(
+
+                    position
+
+                      .isInsideCampus
+
+                  );
+
+                  if (
+
+                    !position
+
+                      .isInsideCampus
+
+                  ) {
+
+                    return;
+
+                  }
+
+                  const newPosition =
+
+                    {
+
+                      x:
+
+                        position.x,
+
+                      y:
+
+                        position.y,
+
+                    };
+
+                  setUserPos(
+
+                    newPosition
+
+                  );
+
+                  // -------------------------------
+
+                  // Smooth marker
+
+                  // -------------------------------
+
+                  markerX.value =
+
+                    withTiming(
+
+                      newPosition.x,
+
+                      {
+
+                        duration:
+
+                          600,
+
+                      }
+
+                    );
+
+                  markerY.value =
+
+                    withTiming(
+
+                      newPosition.y,
+
+                      {
+
+                        duration:
+
+                          600,
+
+                      }
+
+                    );
+
+                }
+
+              );
+
+        } catch (error) {
+
+          console.log(
+
+            'Location error:',
+
+            error
+
+          );
+
+          setLocationGranted(
+
+            false
+
+          );
+
+          setIsWaitingForLocation(
+
+            false
+
+          );
+
         }
-      );
-    })();
+
+      };
+
+    startLocation();
 
     return () => {
-      if (locationSub) locationSub.remove();
-      Speech.stop();
+
+      subscription?.remove();
+
     };
+
   }, []);
 
-  useEffect(() => {
-    if (activeRoute) {
-      handleGenerateRoute(true);
-    }
-  }, [blockedNodes]);
+  // =======================================================
 
-  const handleGenerateRoute = (isHazardRecalculation = false) => {
-    const result = calculateShortestPath(userPos, blockedNodes);
+  // CALCULATE NEAREST EXIT
 
-    if (result.warningMessage) {
-      speakInstruction(result.warningMessage);
-      setActiveRoute(null);
-      setDirections([]);
-      setIsRouteActive(false);
-      return;
-    }
+  // =======================================================
 
-    setDirections(result.directions);
-    setCurrentStepIndex(0);
-    setActiveRoute(result.pathString);
-    setIsRouteActive(true);
+const handleCalculateRoute = () => {
 
-    if (result.directions.length > 0) {
-      const firstStep = result.directions[0];
-      const prefix = isHazardRecalculation ? 'Hazard alert! Indoor route recalculated. ' : '';
-      speakInstruction(`${prefix}In ${firstStep.dist} meters, ${firstStep.msg.toLowerCase()}`);
-    }
+  if (!locationGranted) {
+
+    setSelectedEvacuationAreaId(null);
+
+    Alert.alert(
+
+      'Location Required',
+
+      'Please allow location access first.'
+
+    );
+
+    return;
+
+  }
+
+  if (!isInsideCampus) {
+
+    setSelectedEvacuationAreaId(null);
+
+    Alert.alert(
+
+      'Outside Campus',
+
+      'You must be inside the mapped campus area to calculate an evacuation route.'
+
+    );
+
+    return;
+
+  }
+
+  const result =
+
+    calculateShortestPath(userPos);
+
+  if (!result.success) {
+
+    setActiveRoute(null);
+
+    // Hide evacuation area if no route exists.
+
+    setSelectedEvacuationAreaId(null);
+
+    Alert.alert(
+
+      'Route unavailable',
+
+      result.message
+
+    );
+
+    return;
+
+  }
+
+  setActiveRoute(result);
+
+  // Show the evacuation site ONLY after
+
+  // a successful calculation.
+
+  setSelectedEvacuationAreaId(
+
+    'EVAC_AREA_1'
+
+  );
+
+  translateX.value =
+
+    withSpring(0);
+
+  translateY.value =
+
+    withSpring(0);
+
+  savedTranslateX.value = 0;
+
+  savedTranslateY.value = 0;
+
+};
+
+  // =======================================================
+
+  // STOP NAVIGATION
+
+  // =======================================================
+
+  const handleStopRoute = () => {
+    setActiveRoute(null);
+
+    // Hide evacuation site again.
+    setSelectedEvacuationAreaId(null);
   };
 
-  const handleToggleFireHazard = (key: string) => {
-    setBlockedNodes((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
-    });
-  };
+const clampMapTranslation = (
+    proposedX: number,
+    proposedY: number,
+    currentScale: number
+  ) => {
+    'worklet';
 
-  // Animated map style handles centering the user and adding the smooth spring-back pan offset
-  const animatedMapStyle = useAnimatedStyle(() => {
-    const userPixelX = (userPos.x / 100) * MAP_SIZE;
-    const userPixelY = (userPos.y / 100) * MAP_SIZE;
+    const userPixelX =
+      (userPos.x / 100) * MAP_SIZE;
 
-    const centerX = SCREEN_WIDTH / 2;
-    const centerY = SCREEN_HEIGHT * 0.40;
+    const userPixelY =
+      (userPos.y / 100) * MAP_SIZE;
+
+    /*
+     * IMPORTANT:
+     * Navigation still uses MAP_SIZE (1200).
+     *
+     * Panning limits use CONTEXT_SIZE (1800),
+     * so the user can swipe all the way to the
+     * light outside-map border.
+     */
+    const scaledContextSize =
+      CONTEXT_SIZE * currentScale;
+
+    const halfScaledContext =
+      scaledContextSize / 2;
+
+    let clampedX = proposedX;
+    let clampedY = proposedY;
+
+    // =========================================
+    // HORIZONTAL LIMIT
+    // =========================================
+
+    if (
+      scaledContextSize <=
+      viewportSize.width
+    ) {
+      // Entire outside context fits horizontally.
+      // Keep it centered.
+      clampedX =
+        userPixelX -
+        MAP_SIZE / 2;
+    } else {
+      /*
+       * mapCenterScreenX is:
+       *
+       * viewportWidth / 2
+       * - userPixelX
+       * + translateX
+       * + MAP_SIZE / 2
+       *
+       * The outside context is centered on the
+       * same point as the UST map, but extends
+       * farther on every side.
+       */
+      const minX =
+        userPixelX -
+        MAP_SIZE / 2 +
+        viewportSize.width / 2 -
+        halfScaledContext;
+
+      const maxX =
+        userPixelX -
+        MAP_SIZE / 2 -
+        viewportSize.width / 2 +
+        halfScaledContext;
+
+      clampedX = Math.max(
+        minX,
+        Math.min(maxX, proposedX)
+      );
+    }
+
+    // =========================================
+    // VERTICAL LIMIT
+    // =========================================
+
+    if (
+      scaledContextSize <=
+      viewportSize.height
+    ) {
+      // Entire outside context fits vertically.
+      // Keep it centered.
+      clampedY =
+        userPixelY -
+        MAP_SIZE / 2;
+    } else {
+      const minY =
+        userPixelY -
+        MAP_SIZE / 2 +
+        viewportSize.height / 2 -
+        halfScaledContext;
+
+      const maxY =
+        userPixelY -
+        MAP_SIZE / 2 -
+        viewportSize.height / 2 +
+        halfScaledContext;
+
+      clampedY = Math.max(
+        minY,
+        Math.min(maxY, proposedY)
+      );
+    }
 
     return {
-      transform: [
-        { translateX: centerX + translateX.value },
-        { translateY: centerY + translateY.value },
-        { translateX: -userPixelX },
-        { translateY: -userPixelY },
-      ],
+      x: clampedX,
+      y: clampedY,
     };
-  }, [userPos]);
+  };
+
+  // =======================================================
+
+  // PAN
+
+  // =======================================================
+
+  const panGesture = Gesture.Pan()
+    .minDistance(8)
+    .averageTouches(true)
+
+    .onStart(() => {
+      savedTranslateX.value =
+        translateX.value;
+
+      savedTranslateY.value =
+        translateY.value;
+    })
+
+    .onUpdate((event) => {
+      const proposedX =
+        savedTranslateX.value +
+        event.translationX;
+
+      const proposedY =
+        savedTranslateY.value +
+        event.translationY;
+
+      const clamped =
+        clampMapTranslation(
+          proposedX,
+          proposedY,
+          scale.value
+        );
+
+      translateX.value =
+        clamped.x;
+
+      translateY.value =
+        clamped.y;
+    })
+
+    .onEnd(() => {
+      savedTranslateX.value =
+        translateX.value;
+
+      savedTranslateY.value =
+        translateY.value;
+    });
+
+  // =======================================================
+
+  // PINCH
+
+  // =======================================================
+
+  const pinchGesture = Gesture.Pinch()
+    .onStart((event) => {
+      savedScale.value = scale.value;
+
+      pinchStartTranslateX.value =
+        translateX.value;
+
+      pinchStartTranslateY.value =
+        translateY.value;
+
+      const userPixelX =
+        (userPos.x / 100) * MAP_SIZE;
+
+      const userPixelY =
+        (userPos.y / 100) * MAP_SIZE;
+
+      const mapCenterScreenX =
+        viewportSize.width / 2 -
+        userPixelX +
+        translateX.value +
+        MAP_SIZE / 2;
+
+      const mapCenterScreenY =
+        viewportSize.height / 2 -
+        userPixelY +
+        translateY.value +
+        MAP_SIZE / 2;
+
+      pinchStartX.value =
+        (event.focalX - mapCenterScreenX) /
+        scale.value;
+
+      pinchStartY.value =
+        (event.focalY - mapCenterScreenY) /
+        scale.value;
+    })
+
+    .onUpdate((event) => {
+      const ZOOM_SENSITIVITY = 0.78;
+
+      const softenedScale =
+        1 +
+        (event.scale - 1) *
+          ZOOM_SENSITIVITY;
+
+      let newScale =
+        savedScale.value *
+        softenedScale;
+
+      newScale = Math.max(
+        MIN_ZOOM,
+        Math.min(MAX_ZOOM, newScale)
+      );
+
+      const userPixelX =
+        (userPos.x / 100) * MAP_SIZE;
+
+      const userPixelY =
+        (userPos.y / 100) * MAP_SIZE;
+
+      const proposedX =
+        event.focalX -
+        (
+          viewportSize.width / 2 -
+          userPixelX +
+          MAP_SIZE / 2
+        ) -
+        pinchStartX.value *
+          newScale;
+
+      const proposedY =
+        event.focalY -
+        (
+          viewportSize.height / 2 -
+          userPixelY +
+          MAP_SIZE / 2
+        ) -
+        pinchStartY.value *
+          newScale;
+
+      const clamped =
+        clampMapTranslation(
+          proposedX,
+          proposedY,
+          newScale
+        );
+
+      translateX.value =
+        clamped.x;
+
+      translateY.value =
+        clamped.y;
+
+      scale.value =
+        newScale;
+    })
+
+    .onEnd(() => {
+      savedScale.value =
+        scale.value;
+
+      savedTranslateX.value =
+        translateX.value;
+
+      savedTranslateY.value =
+        translateY.value;
+
+      runOnJS(setZoomDisplay)(
+        Math.round(
+          scale.value * 100
+        ) / 100
+      );
+    });
+
+  // =======================================================
+
+  // DOUBLE TAP
+
+  // =======================================================
+
+  const doubleTapGesture = Gesture.Tap()
+    .numberOfTaps(2)
+    .maxDuration(250)
+
+    .onEnd((event) => {
+      const targetScale =
+        scale.value >= 1.8
+          ? 1
+          : Math.min(
+              scale.value * 1.8,
+              MAX_ZOOM
+            );
+
+      const userPixelX =
+        (userPos.x / 100) * MAP_SIZE;
+
+      const userPixelY =
+        (userPos.y / 100) * MAP_SIZE;
+
+      const mapCenterScreenX =
+        viewportSize.width / 2 -
+        userPixelX +
+        translateX.value +
+        MAP_SIZE / 2;
+
+      const mapCenterScreenY =
+        viewportSize.height / 2 -
+        userPixelY +
+        translateY.value +
+        MAP_SIZE / 2;
+
+      const localX =
+        (event.x - mapCenterScreenX) /
+        scale.value;
+
+      const localY =
+        (event.y - mapCenterScreenY) /
+        scale.value;
+
+      const proposedX =
+        event.x -
+        (
+          viewportSize.width / 2 -
+          userPixelX +
+          MAP_SIZE / 2
+        ) -
+        localX * targetScale;
+
+      const proposedY =
+        event.y -
+        (
+          viewportSize.height / 2 -
+          userPixelY +
+          MAP_SIZE / 2
+        ) -
+        localY * targetScale;
+
+      const clamped =
+        clampMapTranslation(
+          proposedX,
+          proposedY,
+          targetScale
+        );
+
+      translateX.value =
+        withSpring(clamped.x);
+
+      translateY.value =
+        withSpring(clamped.y);
+
+      scale.value =
+        withSpring(targetScale);
+
+      savedTranslateX.value =
+        clamped.x;
+
+      savedTranslateY.value =
+        clamped.y;
+
+      savedScale.value =
+        targetScale;
+
+      runOnJS(setZoomDisplay)(
+        Math.round(
+          targetScale * 100
+        ) / 100
+      );
+    });
+
+  const mapGesture = Gesture.Simultaneous(
+
+    panGesture,
+
+    pinchGesture,
+
+    doubleTapGesture
+
+  );
+
+  // =======================================================
+
+  // RECENTER / NORTH-UP
+
+  // =======================================================
+
+  const handleRecenter = () => {
+
+    translateX.value = withSpring(0);
+
+    translateY.value = withSpring(0);
+
+    savedTranslateX.value = 0;
+
+    savedTranslateY.value = 0;
+
+    scale.value = withSpring(1);
+
+    savedScale.value = 1;
+
+    setZoomDisplay(1);
+
+  };
+
+  const handleFitCampus = () => {
+
+    const horizontalScale =
+
+      viewportSize.width / MAP_SIZE;
+
+    const verticalScale =
+
+      viewportSize.height / MAP_SIZE;
+
+    const fitScale =
+
+      Math.min(
+
+        horizontalScale,
+
+        verticalScale
+
+      ) * 0.9;
+
+    const targetScale =
+
+      Math.max(
+
+        MIN_ZOOM,
+
+        Math.min(
+
+          MAX_ZOOM,
+
+          fitScale
+
+        )
+
+      );
+
+    const userPixelX =
+
+      (userPos.x / 100) *
+
+      MAP_SIZE;
+
+    const userPixelY =
+
+      (userPos.y / 100) *
+
+      MAP_SIZE;
+
+    const targetTranslateX =
+
+      userPixelX -
+
+      MAP_SIZE / 2;
+
+    const targetTranslateY =
+
+      userPixelY -
+
+      MAP_SIZE / 2;
+
+    translateX.value =
+
+      withSpring(targetTranslateX);
+
+    translateY.value =
+
+      withSpring(targetTranslateY);
+
+    scale.value =
+
+      withSpring(targetScale);
+
+    savedTranslateX.value =
+
+      targetTranslateX;
+
+    savedTranslateY.value =
+
+      targetTranslateY;
+
+    savedScale.value =
+
+      targetScale;
+
+    setZoomDisplay(
+
+      Math.round(
+
+        targetScale * 100
+
+      ) / 100
+
+    );
+
+  };
+
+  // =======================================================
+
+  // ZOOM BUTTON HELPER
+
+  // =======================================================
+
+  const zoomAroundViewportCenter = (
+    targetScale: number
+  ) => {
+    const clampedScale =
+      Math.max(
+        MIN_ZOOM,
+        Math.min(
+          MAX_ZOOM,
+          targetScale
+        )
+      );
+
+    const userPixelX =
+      (userPos.x / 100) *
+      MAP_SIZE;
+
+    const userPixelY =
+      (userPos.y / 100) *
+      MAP_SIZE;
+
+    const anchorX =
+      viewportSize.width / 2;
+
+    const anchorY =
+      viewportSize.height / 2;
+
+    const mapCenterScreenX =
+      anchorX -
+      userPixelX +
+      translateX.value +
+      MAP_SIZE / 2;
+
+    const mapCenterScreenY =
+      anchorY -
+      userPixelY +
+      translateY.value +
+      MAP_SIZE / 2;
+
+    const localX =
+      (anchorX - mapCenterScreenX) /
+      scale.value;
+
+    const localY =
+      (anchorY - mapCenterScreenY) /
+      scale.value;
+
+    const proposedX =
+      anchorX -
+      (
+        anchorX -
+        userPixelX +
+        MAP_SIZE / 2
+      ) -
+      localX *
+        clampedScale;
+
+    const proposedY =
+      anchorY -
+      (
+        anchorY -
+        userPixelY +
+        MAP_SIZE / 2
+      ) -
+      localY *
+        clampedScale;
+
+    const clamped =
+      clampMapTranslation(
+        proposedX,
+        proposedY,
+        clampedScale
+      );
+
+    translateX.value =
+      withSpring(clamped.x);
+
+    translateY.value =
+      withSpring(clamped.y);
+
+    scale.value =
+      withSpring(clampedScale);
+
+    savedTranslateX.value =
+      clamped.x;
+
+    savedTranslateY.value =
+      clamped.y;
+
+    savedScale.value =
+      clampedScale;
+
+    setZoomDisplay(
+      Math.round(
+        clampedScale * 100
+      ) / 100
+    );
+  };
+
+  // =======================================================
+
+  // ZOOM +
+
+  // =======================================================
+
+  const handleZoomIn = () => {
+
+    // Multiplicative steps feel more natural than fixed +0.5 jumps.
+
+    zoomAroundViewportCenter(
+
+      scale.value * 1.28
+
+    );
+
+  };
+
+  // =======================================================
+
+  // ZOOM -
+
+  // =======================================================
+
+  const handleZoomOut = () => {
+
+    zoomAroundViewportCenter(
+
+      scale.value / 1.28
+
+    );
+
+  };
+
+  // =======================================================
+
+  // MAP PAN STYLE
+
+  // =======================================================
+
+  const animatedPanStyle =
+
+    useAnimatedStyle(
+
+      () => {
+
+        const userPixelX =
+
+          (
+
+            userPos.x /
+
+            100
+
+          ) *
+
+          MAP_SIZE;
+
+        const userPixelY =
+
+          (
+
+            userPos.y /
+
+            100
+
+          ) *
+
+          MAP_SIZE;
+
+        return {
+
+          transform: [
+
+            {
+
+              translateX:
+
+                viewportSize.width / 2 -
+
+                userPixelX +
+
+                translateX.value,
+
+            },
+
+            {
+
+              translateY:
+
+                viewportSize.height / 2 -
+
+                userPixelY +
+
+                translateY.value,
+
+            },
+
+          ],
+
+        };
+
+      },
+
+      [userPos, viewportSize]
+
+    );
+
+  // =======================================================
+
+  // MAP ZOOM STYLE
+
+  // =======================================================
+
+  const animatedZoomStyle =
+
+    useAnimatedStyle(() => ({
+
+      transform: [
+
+        {
+
+          scale: scale.value,
+
+        },
+
+      ],
+
+    }));
+
+  // =======================================================
+
+  // MARKER STYLE
+
+  // =======================================================
+
+  const animatedMarkerStyle =
+
+    useAnimatedStyle(
+
+      () => ({
+
+        left:
+
+          (
+
+            markerX.value /
+
+            100
+
+          ) *
+
+          MAP_SIZE,
+
+        top:
+
+          (
+
+            markerY.value /
+
+            100
+
+          ) *
+
+          MAP_SIZE,
+
+      })
+
+    );
+
+  // =======================================================
+
+  // STATUS
+
+  // =======================================================
+
+  const getStatus = () => {
+
+    if (
+
+      isWaitingForLocation
+
+    ) {
+
+      return {
+
+        text:
+
+          'Getting location...',
+
+        color:
+
+          '#F59E0B',
+
+      };
+
+    }
+
+    if (
+
+      !locationGranted
+
+    ) {
+
+      return {
+
+        text:
+
+          'Location required',
+
+        color:
+
+          '#EF4444',
+
+      };
+
+    }
+
+    if (
+
+      !isInsideCampus
+
+    ) {
+
+      return {
+
+        text:
+
+          'Outside campus',
+
+        color:
+
+          '#F59E0B',
+
+      };
+
+    }
+
+    return {
+
+      text:
+
+        'Live location',
+
+      color:
+
+        '#22C55E',
+
+    };
+
+  };
+
+  const status =
+
+    getStatus();
+
+  // =======================================================
+
+  // UI
+
+  // =======================================================
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <View style={styles.container}>
-        <StatusBar barStyle="light-content" />
 
-        {/* Pan Gesture Enabled Map View */}
-        <View style={styles.mapPerspectiveContainer}>
-          <GestureDetector gesture={panGesture}>
-            <Animated.View style={[styles.mapContainer, animatedMapStyle]}>
-              <UstMapSvg width={MAP_SIZE} height={MAP_SIZE} preserveAspectRatio="xMidYMid meet" />
+    <GestureHandlerRootView
 
-              <Svg
-                height={MAP_SIZE}
-                width={MAP_SIZE}
-                viewBox="0 0 100 100"
-                style={styles.svgLayer}
-                pointerEvents="none"
-              >
-                <G opacity="0.2" stroke="#EAB308" strokeWidth="0.1">
-                  {EDGES.map((e, i) => (
-                    <Polyline
-                      key={i}
-                      points={`${NODES[e.from]?.x || 0},${NODES[e.from]?.y || 0} ${NODES[e.to]?.x || 0},${NODES[e.to]?.y || 0}`}
-                    />
-                  ))}
-                </G>
+      style={styles.root}
 
-                {activeRoute && (
-                  <Polyline
-                    points={`${userPos.x},${userPos.y} ${activeRoute}`}
-                    fill="none"
-                    stroke="#FF3B30"
-                    strokeWidth="0.4"
-                    strokeLinejoin="round"
-                    strokeLinecap="round"
-                    strokeDasharray="0.6,0.6"
-                  />
-                )}
+    >
 
-                {Object.entries(NODES).map(([key, node]) => {
-                  if (!blockedNodes.has(key)) return null;
-                  return (
-                    <Circle
-                      key={key}
-                      cx={node.x}
-                      cy={node.y}
-                      r="1.2"
-                      fill="#FF3B30"
-                      stroke="#FFF"
-                      strokeWidth="0.2"
-                    />
-                  );
-                })}
-              </Svg>
+      <View
 
-              <View 
-                style={[
-                  styles.userPointerWrapper, 
-                  { 
-                    left: (userPos.x / 100) * MAP_SIZE, 
-                    top: (userPos.y / 100) * MAP_SIZE,
-                  }
-                ]}
-              >
-                <View style={styles.userDotCore} />
-                <View style={styles.userConeGlow} />
-              </View>
-            </Animated.View>
-          </GestureDetector>
-        </View>
+        style={
 
-        <SafeAreaView style={styles.headerWrapper} pointerEvents="box-none">
-          <View style={styles.headerCard}>
-            <View>
-              <Text style={styles.brand}>
-                TOMA<Text style={{ color: '#EAB308' }}>SAFE</Text>
-              </Text>
-              <Text style={styles.subText}>INDOOR EXIT GUIDANCE</Text>
-            </View>
+          styles.container
 
-            <View style={styles.headerActions}>
-              <TouchableOpacity
-                style={[styles.iconBtn, isGuardMode && { backgroundColor: '#FF3B30' }]}
-                onPress={() => {
-                  if (isGuardMode) {
-                    setIsHazardManagerVisible(true);
-                  } else {
-                    setIsGuardModalVisible(true);
-                  }
-                }}
-              >
-                <MaterialCommunityIcons
-                  name={isGuardMode ? 'shield-check' : 'shield-outline'}
-                  size={20}
-                  color={isGuardMode ? '#FFFFFF' : '#007AFF'}
-                />
-              </TouchableOpacity>
+        }
 
-              <TouchableOpacity
-                style={styles.iconBtn}
-                onPress={() => {
-                  const nextMuteState = !isVoiceMuted;
-                  setIsVoiceMuted(nextMuteState);
-                  if (nextMuteState) Speech.stop();
-                  else speakInstruction('Voice navigation enabled');
-                }}
-              >
-                <MaterialCommunityIcons
-                  name={isVoiceMuted ? 'volume-off' : 'volume-high'}
-                  size={20}
-                  color={isVoiceMuted ? '#8E8E93' : '#007AFF'}
-                />
-              </TouchableOpacity>
-            </View>
-          </View>
-        </SafeAreaView>
+      >
 
-        <View style={styles.bottomPanel}>
-          {isGuardMode && (
-            <TouchableOpacity
-              style={styles.guardBannerBtn}
-              onPress={() => setIsHazardManagerVisible(true)}
-            >
-              <MaterialCommunityIcons name="fire" size={16} color="#FFF" />
-              <Text style={styles.guardBannerText}>
-                GUARD MODE: BLOCKED CORRIDORS ({blockedNodes.size} ACTIVE)
-              </Text>
-            </TouchableOpacity>
-          )}
+        <StatusBar
 
-          <TouchableOpacity
-            style={[styles.btn, blockedNodes.size > 0 && styles.emergencyBtn]}
-            onPress={() => handleGenerateRoute()}
-          >
-            <Text style={styles.btnText}>
-              {blockedNodes.size > 0
-                ? 'CALCULATE SAFE INDOOR EXIT'
-                : 'FIND NEAREST BUILDING EXIT'}
-            </Text>
-          </TouchableOpacity>
+          barStyle="dark-content"
 
-          <ScrollView style={styles.stepScroller} showsVerticalScrollIndicator={false}>
-            {directions.length > 0 ? (
-              directions.map((step, i) => {
-                const isActiveStep = i === currentStepIndex;
-                return (
-                  <TouchableOpacity
-                    key={i}
-                    style={[styles.stepItem, isActiveStep && styles.activeStepItem]}
-                    onPress={() => {
-                      setCurrentStepIndex(i);
-                      speakInstruction(`In ${step.dist} meters, ${step.msg}`);
-                    }}
-                  >
-                    <View style={[styles.stepNum, isActiveStep && styles.activeStepNum]}>
-                      <Text style={[styles.stepNumText, isActiveStep && styles.activeStepNumText]}>
-                        {i + 1}
-                      </Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.stepMain, isActiveStep && styles.activeStepMain]}>
-                        {step.msg}
-                      </Text>
-                      <Text style={styles.stepSub}>{step.dist}m away</Text>
-                    </View>
-                    {isActiveStep && (
-                      <MaterialCommunityIcons name="volume-high" size={16} color="#007AFF" />
-                    )}
-                  </TouchableOpacity>
-                );
-              })
-            ) : (
-              <View style={styles.emptyContainer}>
-                <Text style={styles.emptyText}>
-                  {Object.keys(NODES).length === 0
-                    ? '⚠️ Please update navigationUtils.ts with your building map nodes.'
-                    : 'Tap the button above to view your indoor exit route.'}
-                </Text>
-              </View>
-            )}
-          </ScrollView>
-        </View>
+          backgroundColor="#FFFFFF"
 
-        <GuardAuthModal
-          visible={isGuardModalVisible}
-          isGuardMode={isGuardMode}
-          onClose={() => setIsGuardModalVisible(false)}
-          onAuthenticateSuccess={() => {
-            setIsGuardMode(true);
-            setIsHazardManagerVisible(true);
-            speakInstruction('Guard mode active. Open hazard manager to block corridors.');
-          }}
-          onDeactivateGuardMode={() => {
-            setIsGuardMode(false);
-            setIsHazardManagerVisible(false);
-            speakInstruction('Guard mode locked.');
-          }}
         />
 
-        <Modal
-          visible={isHazardManagerVisible}
-          animationType="slide"
-          transparent={true}
-          onRequestClose={() => setIsHazardManagerVisible(false)}
+        {/* ============================================= */}
+
+        {/* MAP                                           */}
+
+        {/* ============================================= */}
+
+        <View
+
+          style={styles.mapViewport}
+
+          onLayout={(event) => {
+
+            const { width, height } =
+
+              event.nativeEvent.layout;
+
+            setViewportSize({
+
+              width,
+
+              height,
+
+            });
+
+          }}
+
         >
-          <View style={styles.modalOverlay}>
-            <View style={styles.hazardSheet}>
-              <View style={styles.sheetHeader}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <MaterialCommunityIcons name="fire" size={20} color="#FF3B30" />
-                  <Text style={styles.sheetTitle}>Manage Indoor Corridor Hazards</Text>
-                </View>
 
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                  <TouchableOpacity
-                    onPress={() => {
-                      setIsGuardMode(false);
-                      setIsHazardManagerVisible(false);
-                      speakInstruction('Returned to student mode.');
-                    }}
-                  >
-                    <Text style={{ color: '#FF3B30', fontSize: 13, fontWeight: '700' }}>
-                      Exit Guard Mode
-                    </Text>
-                  </TouchableOpacity>
+          <GestureDetector
 
-                  <TouchableOpacity onPress={() => setIsHazardManagerVisible(false)}>
-                    <Text style={styles.closeBtnText}>Done</Text>
-                  </TouchableOpacity>
-                </View>
+            gesture={
+
+              mapGesture
+
+            }
+
+          >
+
+            <View
+
+              style={
+
+                styles.gestureArea
+
+              }
+
+            >
+
+              <Animated.View
+
+                style={[
+
+                  styles.mapPanLayer,
+
+                  animatedPanStyle,
+
+                ]}
+
+              >
+
+                <Animated.View
+
+                  style={[
+
+                    styles.mapZoomLayer,
+
+                    animatedZoomStyle,
+
+                  ]}
+
+                >
+
+                  {/* =================================== */}
+
+                  {/* CAMPUS SVG                          */}
+
+                  {/* =================================== */}
+
+                  <CampusContext
+
+  mapSize={MAP_SIZE}
+
+/>
+
+                  <UstMapSvg
+
+  width={MAP_SIZE}
+
+  height={MAP_SIZE}
+
+/>
+
+<CampusFadeOverlay
+
+  mapSize={MAP_SIZE}
+
+/>
+
+<EvacuationAreas
+
+  mapSize={MAP_SIZE}
+
+  activeAreaId={
+
+    selectedEvacuationAreaId
+
+  }
+
+/>
+
+<BuildingLabels
+
+  mapSize={MAP_SIZE}
+
+  zoomLevel={zoomDisplay}
+
+/>
+
+                  {/* =================================== */}
+
+                  {/* ROUTE                               */}
+
+                  {/* =================================== */}
+
+                  {activeRoute &&
+
+                    activeRoute.success && (
+
+                      <Svg
+
+                        width={
+
+                          MAP_SIZE
+
+                        }
+
+                        height={
+
+                          MAP_SIZE
+
+                        }
+
+                        viewBox="0 0 100 100"
+
+                        style={
+
+                          styles.routeOverlay
+
+                        }
+
+                        pointerEvents="none"
+
+                      >
+
+                        {/* ================================= */}
+
+{/* White outline */}
+
+                        <Polyline
+
+                          points={
+
+                            activeRoute
+
+                              .pathString
+
+                          }
+
+                          fill="none"
+
+                          stroke="#FFFFFF"
+
+                          strokeWidth="1.4"
+
+                          strokeLinecap="round"
+
+                          strokeLinejoin="round"
+
+                        />
+
+                        {/* Blue route */}
+
+                        <Polyline
+
+                          points={
+
+                            activeRoute
+
+                              .pathString
+
+                          }
+
+                          fill="none"
+
+                          stroke="#2563EB"
+
+                          strokeWidth="0.75"
+
+                          strokeLinecap="round"
+
+                          strokeLinejoin="round"
+
+                        />
+
+                      </Svg>
+
+                    )}
+
+                  {/* =================================== */}
+
+                  {/* USER LOCATION                       */}
+
+                  {/* =================================== */}
+
+                  {isInsideCampus && (
+
+                    <Animated.View
+
+                      pointerEvents="none"
+
+                      style={[
+
+                        styles.userMarker,
+
+                        animatedMarkerStyle,
+
+                      ]}
+
+                    >
+
+                      <View
+
+                        style={
+
+                          styles.accuracyGlow
+
+                        }
+
+                      />
+
+                      <View
+
+                        style={
+
+                          styles.userDotOuter
+
+                        }
+
+                      >
+
+                        <View
+
+                          style={
+
+                            styles.userDot
+
+                          }
+
+                        />
+
+                      </View>
+
+                    </Animated.View>
+
+                  )}
+
+                </Animated.View>
+
+              </Animated.View>
+
+            </View>
+
+          </GestureDetector>
+
+        </View>
+
+        {/* ============================================= */}
+
+        {/* HEADER                                        */}
+
+        {/* ============================================= */}
+
+        <SafeAreaView
+
+          style={
+
+            styles.headerWrapper
+
+          }
+
+          pointerEvents="box-none"
+
+        >
+
+          <View
+
+            style={
+
+              styles.headerCard
+
+            }
+
+          >
+
+            <View
+
+              style={
+
+                styles.brandContainer
+
+              }
+
+            >
+
+              <View
+
+                style={
+
+                  styles.logoContainer
+
+                }
+
+              >
+
+                <MaterialCommunityIcons
+
+                  name="shield-check"
+
+                  size={20}
+
+                  color="#FFFFFF"
+
+                />
+
               </View>
 
-              <Text style={styles.sheetSub}>
-                Toggle indoor nodes below to mark hallway blockages. Emergency exit routes will automatically reroute around blocked paths.
+              <View>
+
+                <Text
+
+                  style={
+
+                    styles.brand
+
+                  }
+
+                >
+
+                  Toma
+
+                  <Text
+
+                    style={
+
+                      styles.brandAccent
+
+                    }
+
+                  >
+
+                    Safe
+
+                  </Text>
+
+                </Text>
+
+                <Text
+
+                  style={
+
+                    styles.subText
+
+                  }
+
+                >
+
+                  CAMPUS EVACUATION
+
+                </Text>
+
+              </View>
+
+            </View>
+
+            <View
+
+              style={
+
+                styles.mapBadge
+
+              }
+
+            >
+
+              <MaterialCommunityIcons
+
+                name="map-outline"
+
+                size={14}
+
+                color="#2563EB"
+
+              />
+
+              <Text
+
+                style={
+
+                  styles.mapBadgeText
+
+                }
+
+              >
+
+                MAP
+
               </Text>
 
-              <ScrollView style={{ maxHeight: 350 }}>
-                {Object.entries(NODES).map(([key, node]) => {
-                  const isBlocked = blockedNodes.has(key);
-                  return (
-                    <View key={key} style={styles.hazardRow}>
-                      <View>
-                        <Text style={styles.nodeTitle}>{node.name}</Text>
-                        <Text style={styles.nodePosSub}>
-                          {node.isAssembly ? 'Building Exit / Assembly' : 'Indoor Hallway Node'}
-                        </Text>
-                      </View>
-                      <Switch
-                        value={isBlocked}
-                        onValueChange={() => handleToggleFireHazard(key)}
-                        trackColor={{ false: '#D1D1D6', true: '#FF3B30' }}
-                        thumbColor="#FFFFFF"
-                      />
-                    </View>
-                  );
-                })}
-              </ScrollView>
             </View>
+
           </View>
-        </Modal>
+
+        </SafeAreaView>
+
+        {/* ============================================= */}
+
+        {/* GPS STATUS                                    */}
+
+        {/* ============================================= */}
+
+        <View
+
+          style={
+
+            styles.locationStatus
+
+          }
+
+        >
+
+          <View
+
+            style={[
+
+              styles.statusDot,
+
+              {
+
+                backgroundColor:
+
+                  status.color,
+
+              },
+
+            ]}
+
+          />
+
+          <Text
+
+            style={
+
+              styles.locationStatusText
+
+            }
+
+          >
+
+            {status.text}
+
+          </Text>
+
+        </View>
+
+        {/* ============================================= */}
+
+        {/* ZOOM CONTROLS                                 */}
+
+        {/* ============================================= */}
+
+        <View
+
+          style={
+
+            styles.mapControls
+
+          }
+
+        >
+
+          <TouchableOpacity
+
+            style={
+
+              styles.controlButton
+
+            }
+
+            onPress={
+
+              handleZoomIn
+
+            }
+
+          hitSlop={8}
+
+          >
+
+            <MaterialCommunityIcons
+
+              name="plus"
+
+              size={21}
+
+              color="#334155"
+
+            />
+
+          </TouchableOpacity>
+
+          <View
+
+            style={
+
+              styles.controlDivider
+
+            }
+
+          />
+
+          <View
+
+            style={
+
+              styles.zoomIndicator
+
+            }
+
+          >
+
+            <Text
+
+              style={
+
+                styles.zoomIndicatorText
+
+              }
+
+            >
+
+              {zoomDisplay.toFixed(
+
+                1
+
+              )}
+
+              ×
+
+            </Text>
+
+          </View>
+
+          <View
+
+            style={
+
+              styles.controlDivider
+
+            }
+
+          />
+
+          <TouchableOpacity
+
+            style={
+
+              styles.controlButton
+
+            }
+
+            onPress={
+
+              handleZoomOut
+
+            }
+
+          hitSlop={8}
+
+          >
+
+            <MaterialCommunityIcons
+
+              name="minus"
+
+              size={21}
+
+              color="#334155"
+
+            />
+
+          </TouchableOpacity>
+
+        </View>
+
+        {/* ============================================= */}
+
+        {/* RECENTER                                      */}
+
+        {/* ============================================= */}
+
+        <TouchableOpacity
+
+          style={
+
+            styles.recenterButton
+
+          }
+
+          onPress={
+
+            handleRecenter
+
+          }
+
+          hitSlop={8}
+
+        >
+
+          <MaterialCommunityIcons
+
+            name="crosshairs-gps"
+
+            size={22}
+
+            color="#2563EB"
+
+          />
+
+        </TouchableOpacity>
+
+        <TouchableOpacity
+
+          style={styles.fitCampusButton}
+
+          onPress={handleFitCampus}
+
+          hitSlop={8}
+
+        >
+
+          <MaterialCommunityIcons
+
+            name="fit-to-screen-outline"
+
+            size={22}
+
+            color="#334155"
+
+          />
+
+        </TouchableOpacity>
+
+        {/* ============================================= */}
+
+        {/* COMPACT NAVIGATION CARD                       */}
+
+        {/* ============================================= */}
+
+        <View
+
+          style={
+
+            styles.bottomPanel
+
+          }
+
+        >
+
+          {/* Route active */}
+
+          {activeRoute &&
+
+          activeRoute.success ? (
+
+            <>
+
+              <View
+
+                style={
+
+                  styles.routeInfoRow
+
+                }
+
+              >
+
+                <View
+
+                  style={
+
+                    styles.routeIcon
+
+                  }
+
+                >
+
+                  <MaterialCommunityIcons
+
+                    name="navigation-variant"
+
+                    size={21}
+
+                    color="#2563EB"
+
+                  />
+
+                </View>
+
+                <View
+
+                  style={
+
+                    styles.routeTextContainer
+
+                  }
+
+                >
+
+                  <Text
+
+                    style={
+
+                      styles.routeLabel
+
+                    }
+
+                  >
+
+                    NEAREST EXIT
+
+                  </Text>
+
+                  <Text
+
+                    style={
+
+                      styles.routeTitle
+
+                    }
+
+                    numberOfLines={1}
+
+                  >
+
+                    {
+
+                      activeRoute
+
+                        .exitName
+
+                    }
+
+                  </Text>
+
+                  <Text
+
+                    style={
+
+                      styles.routeDistance
+
+                    }
+
+                  >
+
+                    Approx.{' '}
+
+                    {Math.round(activeRoute.distance)}{' '}
+
+                    m route
+
+                  </Text>
+
+                </View>
+
+                <TouchableOpacity
+
+                  style={
+
+                    styles.stopButton
+
+                  }
+
+                  onPress={
+
+                    handleStopRoute
+
+                  }
+
+                >
+
+                  <MaterialCommunityIcons
+
+                    name="close"
+
+                    size={18}
+
+                    color="#EF4444"
+
+                  />
+
+                </TouchableOpacity>
+
+              </View>
+
+            </>
+
+          ) : (
+
+            <>
+
+              {/* Location */}
+
+              <View
+
+                style={
+
+                  styles.compactLocationRow
+
+                }
+
+              >
+
+                <View
+
+                  style={
+
+                    styles.compactLocationIcon
+
+                  }
+
+                >
+
+                  <MaterialCommunityIcons
+
+                    name="crosshairs-gps"
+
+                    size={20}
+
+                    color="#2563EB"
+
+                  />
+
+                </View>
+
+                <View
+
+                  style={
+
+                    styles.compactLocationInfo
+
+                  }
+
+                >
+
+                  <Text
+
+                    style={
+
+                      styles.compactLocationTitle
+
+                    }
+
+                  >
+
+                    {isInsideCampus
+
+                      ? 'Live Location'
+
+                      : 'Location unavailable'}
+
+                  </Text>
+
+                  <Text
+
+  style={
+
+    styles.compactLocationSubtext
+
+  }
+
+>
+
+  {locationAccuracy !== null
+
+  ? `GPS accuracy ±${Math.round(locationAccuracy)} m`
+
+  : 'Waiting for GPS...'}
+
+</Text>
+
+                </View>
+
+                <View
+
+                  style={[
+
+                    styles.liveIndicator,
+
+                    {
+
+                      backgroundColor:
+
+                        status.color,
+
+                    },
+
+                  ]}
+
+                />
+
+              </View>
+
+              {/* ======================================= */}
+
+              {/* CALCULATE ROUTE BUTTON                  */}
+
+              {/* ======================================= */}
+
+              <TouchableOpacity
+
+                style={[
+
+                  styles.routeButton,
+
+                  (!locationGranted || !isInsideCampus) &&
+
+                    styles.routeButtonDisabled,
+
+                ]}
+
+                disabled={!locationGranted || !isInsideCampus}
+
+                activeOpacity={
+
+                  0.85
+
+                }
+
+                onPress={
+
+                  handleCalculateRoute
+
+                }
+
+              >
+
+                <MaterialCommunityIcons
+
+                  name="directions-fork"
+
+                  size={19}
+
+                  color="#FFFFFF"
+
+                />
+
+                <Text
+
+                  style={
+
+                    styles.routeButtonText
+
+                  }
+
+                >
+
+                  FIND NEAREST EXIT
+
+                </Text>
+
+              </TouchableOpacity>
+
+            </>
+
+          )}
+
+        </View>
+
       </View>
+
     </GestureHandlerRootView>
+
   );
+
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f172a' },
-  mapPerspectiveContainer: { flex: 1, overflow: 'hidden', backgroundColor: '#0f172a' },
-  mapContainer: { width: MAP_SIZE, height: MAP_SIZE, position: 'absolute', top: 0, left: 0 },
-  svgLayer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  userPointerWrapper: { position: 'absolute', width: 28, height: 28, marginLeft: -14, marginTop: -14, justifyContent: 'center', alignItems: 'center', zIndex: 99 },
-  userDotCore: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#007AFF', borderWidth: 2.5, borderColor: '#FFFFFF', elevation: 6 },
-  userConeGlow: { position: 'absolute', width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(0, 122, 255, 0.35)' },
-  headerWrapper: { position: 'absolute', top: 10, left: 0, right: 0, zIndex: 10 },
-  headerCard: { marginHorizontal: 16, paddingHorizontal: 18, paddingVertical: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(15, 23, 42, 0.90)', borderRadius: 18, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)', elevation: 8 },
-  brand: { fontSize: 20, fontWeight: '900', color: '#FFFFFF' },
-  subText: { fontSize: 8, fontWeight: '700', color: '#94A3B8', letterSpacing: 1 },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  iconBtn: { width: 34, height: 34, backgroundColor: '#1E293B', borderRadius: 17, justifyContent: 'center', alignItems: 'center' },
-  bottomPanel: { position: 'absolute', bottom: 0, left: 0, right: 0, height: SCREEN_HEIGHT * 0.25, backgroundColor: '#1E293B', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, borderTopLeftRadius: 24, borderTopRightRadius: 24, elevation: 20, zIndex: 10, borderTopWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)' },
-  guardBannerBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#FF3B30', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, marginBottom: 8, gap: 6 },
-  guardBannerText: { color: '#FFF', fontSize: 10, fontWeight: '900' },
-  btn: { backgroundColor: '#0F172A', paddingVertical: 14, borderRadius: 14, alignItems: 'center', marginBottom: 10, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.15)' },
-  emergencyBtn: { backgroundColor: '#FF3B30', borderColor: '#FF3B30' },
-  btnText: { color: '#fff', fontWeight: '900', fontSize: 12 },
-  stepScroller: { flex: 1 },
-  stepItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, padding: 8, borderRadius: 10 },
-  activeStepItem: { backgroundColor: '#0F172A' },
-  stepNum: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#EAB308', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
-  activeStepNum: { backgroundColor: '#007AFF' },
-  stepNumText: { fontSize: 10, fontWeight: '900', color: '#000' },
-  activeStepNumText: { color: '#FFF' },
-  stepMain: { fontSize: 12, fontWeight: '700', color: '#F1F5F9' },
-  activeStepMain: { color: '#38BDF8' },
-  stepSub: { fontSize: 10, color: '#94A3B8' },
-  emptyContainer: { alignItems: 'center', paddingVertical: 10 },
-  emptyText: { color: '#94A3B8', fontSize: 11, fontStyle: 'italic', textAlign: 'center' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  hazardSheet: { backgroundColor: '#1E293B', padding: 20, borderTopLeftRadius: 24, borderTopRightRadius: 24 },
-  sheetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  sheetTitle: { fontSize: 16, fontWeight: '900', color: '#FFFFFF' },
-  sheetSub: { fontSize: 11, color: '#94A3B8', marginBottom: 14 },
-  closeBtnText: { fontSize: 14, fontWeight: '800', color: '#38BDF8' },
-  hazardRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 0.5, borderBottomColor: 'rgba(255, 255, 255, 0.1)' },
-  nodeTitle: { fontSize: 13, fontWeight: '800', color: '#FFFFFF' },
-  nodePosSub: { fontSize: 10, color: '#94A3B8' },
-});
+// =========================================================
+
+// STYLES
+
+// =========================================================
+
+const styles =
+
+  StyleSheet.create({
+
+    root: {
+
+      flex: 1,
+
+    },
+
+    container: {
+
+      flex: 1,
+
+      backgroundColor:
+
+        '#F8FAFC',
+
+    },
+
+    // =====================================================
+
+    // MAP
+
+    // =====================================================
+
+    mapViewport: {
+
+  flex: 1,
+
+  overflow: 'hidden',
+
+  backgroundColor: '#FFFFFF',
+
+},
+
+    gestureArea: {
+
+      flex: 1,
+
+      width: '100%',
+
+      height: '100%',
+
+    },
+
+    mapPanLayer: {
+
+      position: 'absolute',
+
+      width: MAP_SIZE,
+
+      height: MAP_SIZE,
+
+      top: 0,
+
+      left: 0,
+
+    },
+
+    mapZoomLayer: {
+
+      width: MAP_SIZE,
+
+      height: MAP_SIZE,
+
+    },
+
+    routeOverlay: {
+
+      position: 'absolute',
+
+      top: 0,
+
+      left: 0,
+
+    },
+
+    // =====================================================
+
+    // USER MARKER
+
+    // =====================================================
+
+    userMarker: {
+
+      position: 'absolute',
+
+      width: 40,
+
+      height: 40,
+
+      marginLeft: -20,
+
+      marginTop: -20,
+
+      alignItems:
+
+        'center',
+
+      justifyContent:
+
+        'center',
+
+      zIndex: 100,
+
+    },
+
+    accuracyGlow: {
+
+      position:
+
+        'absolute',
+
+      width: 34,
+
+      height: 34,
+
+      borderRadius: 17,
+
+      backgroundColor:
+
+        'rgba(37,99,235,0.15)',
+
+      borderWidth: 1,
+
+      borderColor:
+
+        'rgba(37,99,235,0.20)',
+
+    },
+
+    userDotOuter: {
+
+      width: 18,
+
+      height: 18,
+
+      borderRadius: 9,
+
+      backgroundColor:
+
+        '#FFFFFF',
+
+      alignItems:
+
+        'center',
+
+      justifyContent:
+
+        'center',
+
+      elevation: 9,
+
+    },
+
+    userDot: {
+
+      width: 10,
+
+      height: 10,
+
+      borderRadius: 5,
+
+      backgroundColor:
+
+        '#2563EB',
+
+    },
+
+    // =====================================================
+
+    // HEADER
+
+    // =====================================================
+
+    headerWrapper: {
+
+      position:
+
+        'absolute',
+
+      top: 0,
+
+      left: 0,
+
+      right: 0,
+
+      zIndex: 30,
+
+    },
+
+    headerCard: {
+
+      marginHorizontal:
+
+        14,
+
+      marginTop: 6,
+
+      minHeight: 56,
+
+      paddingHorizontal:
+
+        12,
+
+      paddingVertical: 8,
+
+      borderRadius: 16,
+
+      backgroundColor:
+
+        'rgba(255,255,255,0.96)',
+
+      flexDirection:
+
+        'row',
+
+      alignItems:
+
+        'center',
+
+      justifyContent:
+
+        'space-between',
+
+      borderWidth: 1,
+
+      borderColor:
+
+        '#E2E8F0',
+
+      elevation: 7,
+
+    },
+
+    brandContainer: {
+
+      flexDirection:
+
+        'row',
+
+      alignItems:
+
+        'center',
+
+    },
+
+    logoContainer: {
+
+      width: 36,
+
+      height: 36,
+
+      borderRadius: 11,
+
+      backgroundColor:
+
+        '#0F172A',
+
+      alignItems:
+
+        'center',
+
+      justifyContent:
+
+        'center',
+
+      marginRight: 9,
+
+    },
+
+    brand: {
+
+      fontSize: 18,
+
+      fontWeight:
+
+        '900',
+
+      color:
+
+        '#0F172A',
+
+    },
+
+    brandAccent: {
+
+      color:
+
+        '#2563EB',
+
+    },
+
+    subText: {
+
+      marginTop: 1,
+
+      fontSize: 7,
+
+      fontWeight:
+
+        '800',
+
+      color:
+
+        '#94A3B8',
+
+      letterSpacing: 1,
+
+    },
+
+    mapBadge: {
+
+      flexDirection:
+
+        'row',
+
+      alignItems:
+
+        'center',
+
+      backgroundColor:
+
+        '#EFF6FF',
+
+      paddingHorizontal:
+
+        8,
+
+      paddingVertical: 6,
+
+      borderRadius: 9,
+
+    },
+
+    mapBadgeText: {
+
+      marginLeft: 4,
+
+      fontSize: 7,
+
+      fontWeight:
+
+        '900',
+
+      color:
+
+        '#2563EB',
+
+    },
+
+    // =====================================================
+
+    // STATUS
+
+    // =====================================================
+
+    locationStatus: {
+
+      position:
+
+        'absolute',
+
+      top: 94,
+
+      alignSelf:
+
+        'center',
+
+      flexDirection:
+
+        'row',
+
+      alignItems:
+
+        'center',
+
+      paddingHorizontal:
+
+        10,
+
+      paddingVertical: 6,
+
+      borderRadius: 18,
+
+      backgroundColor:
+
+        'rgba(255,255,255,0.95)',
+
+      borderWidth: 1,
+
+      borderColor:
+
+        '#E2E8F0',
+
+      elevation: 4,
+
+      zIndex: 25,
+
+    },
+
+    statusDot: {
+
+      width: 7,
+
+      height: 7,
+
+      borderRadius: 4,
+
+      marginRight: 6,
+
+    },
+
+    locationStatusText: {
+
+      fontSize: 10,
+
+      fontWeight:
+
+        '700',
+
+      color:
+
+        '#475569',
+
+    },
+
+    // =====================================================
+
+    // CONTROLS
+
+    // =====================================================
+
+    mapControls: {
+
+      position:
+
+        'absolute',
+
+      right: 14,
+
+      bottom: 237,
+
+      width: 48,
+
+      borderRadius: 14,
+
+      backgroundColor:
+
+        '#FFFFFF',
+
+      borderWidth: 1,
+
+      borderColor:
+
+        '#E2E8F0',
+
+      overflow:
+
+        'hidden',
+
+      elevation: 7,
+
+      zIndex: 25,
+
+    },
+
+    controlButton: {
+
+      width: 48,
+
+      height: 48,
+
+      alignItems:
+
+        'center',
+
+      justifyContent:
+
+        'center',
+
+    },
+
+    controlDivider: {
+
+      height: 1,
+
+      marginHorizontal:
+
+        7,
+
+      backgroundColor:
+
+        '#E2E8F0',
+
+    },
+
+    zoomIndicator: {
+
+      height: 24,
+
+      alignItems:
+
+        'center',
+
+      justifyContent:
+
+        'center',
+
+      backgroundColor:
+
+        '#F8FAFC',
+
+    },
+
+    zoomIndicatorText: {
+
+      fontSize: 8,
+
+      fontWeight:
+
+        '800',
+
+      color:
+
+        '#64748B',
+
+    },
+
+    recenterButton: {
+
+      position:
+
+        'absolute',
+
+      right: 14,
+
+      bottom: 180,
+
+      width: 48,
+
+      height: 48,
+
+      borderRadius: 14,
+
+      backgroundColor:
+
+        '#FFFFFF',
+
+      alignItems:
+
+        'center',
+
+      justifyContent:
+
+        'center',
+
+      borderWidth: 1,
+
+      borderColor:
+
+        '#E2E8F0',
+
+      elevation: 7,
+
+      zIndex: 25,
+
+    },
+
+    fitCampusButton: {
+
+      position: 'absolute',
+
+      right: 14,
+
+      bottom: 123,
+
+      width: 48,
+
+      height: 48,
+
+      borderRadius: 14,
+
+      backgroundColor: '#FFFFFF',
+
+      alignItems: 'center',
+
+      justifyContent: 'center',
+
+      borderWidth: 1,
+
+      borderColor: '#E2E8F0',
+
+      elevation: 7,
+
+      zIndex: 25,
+
+    },
+
+    // =====================================================
+
+    // BOTTOM CARD
+
+    // =====================================================
+
+    bottomPanel: {
+
+      position:
+
+        'absolute',
+
+      bottom: 12,
+
+      left: 14,
+
+      right: 14,
+
+      padding: 10,
+
+      backgroundColor:
+
+        'rgba(255,255,255,0.98)',
+
+      borderRadius: 18,
+
+      borderWidth: 1,
+
+      borderColor:
+
+        '#E2E8F0',
+
+      elevation: 12,
+
+      zIndex: 20,
+
+    },
+
+    compactLocationRow: {
+
+      flexDirection:
+
+        'row',
+
+      alignItems:
+
+        'center',
+
+    },
+
+    compactLocationIcon: {
+
+      width: 38,
+
+      height: 38,
+
+      borderRadius: 12,
+
+      backgroundColor:
+
+        '#EFF6FF',
+
+      alignItems:
+
+        'center',
+
+      justifyContent:
+
+        'center',
+
+      marginRight: 10,
+
+    },
+
+    compactLocationInfo: {
+
+      flex: 1,
+
+    },
+
+    compactLocationTitle: {
+
+      fontSize: 13,
+
+      fontWeight:
+
+        '800',
+
+      color:
+
+        '#0F172A',
+
+    },
+
+    compactLocationSubtext: {
+
+      marginTop: 1,
+
+      fontSize: 9,
+
+      fontWeight:
+
+        '600',
+
+      color:
+
+        '#64748B',
+
+    },
+
+    liveIndicator: {
+
+      width: 8,
+
+      height: 8,
+
+      borderRadius: 4,
+
+      marginLeft: 8,
+
+    },
+
+    // =====================================================
+
+    // ROUTE BUTTON
+
+    // =====================================================
+
+    routeButton: {
+
+      height: 48,
+
+      marginTop: 9,
+
+      borderRadius: 12,
+
+      backgroundColor:
+
+        '#2563EB',
+
+      flexDirection:
+
+        'row',
+
+      alignItems:
+
+        'center',
+
+      justifyContent:
+
+        'center',
+
+    },
+
+    routeButtonDisabled: {
+
+      backgroundColor:
+
+        '#94A3B8',
+
+      opacity: 0.65,
+
+    },
+
+    routeButtonText: {
+
+      marginLeft: 7,
+
+      fontSize: 11,
+
+      fontWeight:
+
+        '900',
+
+      color:
+
+        '#FFFFFF',
+
+      letterSpacing: 0.4,
+
+    },
+
+    // =====================================================
+
+    // ACTIVE ROUTE
+
+    // =====================================================
+
+    routeInfoRow: {
+
+      flexDirection:
+
+        'row',
+
+      alignItems:
+
+        'center',
+
+    },
+
+    routeIcon: {
+
+      width: 40,
+
+      height: 40,
+
+      borderRadius: 12,
+
+      backgroundColor:
+
+        '#EFF6FF',
+
+      alignItems:
+
+        'center',
+
+      justifyContent:
+
+        'center',
+
+      marginRight: 10,
+
+    },
+
+    routeTextContainer: {
+
+      flex: 1,
+
+    },
+
+    routeLabel: {
+
+      fontSize: 8,
+
+      fontWeight:
+
+        '900',
+
+      color:
+
+        '#94A3B8',
+
+      letterSpacing: 1,
+
+    },
+
+    routeTitle: {
+
+      marginTop: 1,
+
+      fontSize: 13,
+
+      fontWeight:
+
+        '900',
+
+      color:
+
+        '#0F172A',
+
+    },
+
+    routeDistance: {
+
+      marginTop: 1,
+
+      fontSize: 9,
+
+      fontWeight:
+
+        '600',
+
+      color:
+
+        '#64748B',
+
+    },
+
+    stopButton: {
+
+      width: 34,
+
+      height: 34,
+
+      borderRadius: 10,
+
+      backgroundColor:
+
+        '#FEF2F2',
+
+      alignItems:
+
+        'center',
+
+      justifyContent:
+
+        'center',
+
+      marginLeft: 8,
+
+    },
+
+  });

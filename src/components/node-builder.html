@@ -1,0 +1,2191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TomaSafe Node Builder</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      height: 100%;
+      font-family: Arial, sans-serif;
+      background: #f3f4f6;
+      color: #111827;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ===================================================== */
+    /* SIDEBAR */
+    /* ===================================================== */
+
+    .sidebar {
+      background: #ffffff;
+      border-right: 1px solid #d1d5db;
+      padding: 16px;
+      overflow-y: auto;
+    }
+
+    .sidebar h1 {
+      margin: 0 0 18px;
+      font-size: 22px;
+    }
+
+    .section {
+      margin-bottom: 22px;
+    }
+
+    .section h3 {
+      margin: 0 0 10px;
+      font-size: 15px;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      margin-bottom: 5px;
+      color: #4b5563;
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      padding: 9px 10px;
+      border: 1px solid #d1d5db;
+      border-radius: 9px;
+      margin-bottom: 9px;
+      background: #ffffff;
+    }
+
+    textarea {
+      min-height: 230px;
+      resize: vertical;
+      font-family: Consolas, monospace;
+      font-size: 12px;
+    }
+
+    button {
+      width: 100%;
+      border: 0;
+      border-radius: 9px;
+      padding: 10px;
+      cursor: pointer;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .primary {
+      background: #2563eb;
+      color: white;
+    }
+
+    .secondary {
+      background: #e5e7eb;
+      color: #111827;
+    }
+
+    .danger {
+      background: #dc2626;
+      color: white;
+    }
+
+    .warning {
+      background: #f59e0b;
+      color: #111827;
+    }
+
+    .active {
+      outline: 3px solid #f59e0b;
+    }
+
+    .row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .row > * {
+      flex: 1;
+    }
+
+    .status {
+      font-size: 12px;
+      line-height: 1.45;
+      padding: 10px;
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      margin-top: 6px;
+    }
+
+    .small {
+      font-size: 11px;
+      color: #6b7280;
+      line-height: 1.4;
+    }
+
+    .node-list {
+      max-height: 220px;
+      overflow-y: auto;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+    }
+
+    .node-item {
+      padding: 8px 10px;
+      border-bottom: 1px solid #e5e7eb;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .node-item:last-child {
+      border-bottom: none;
+    }
+
+    .node-item:hover {
+      background: #f3f4f6;
+    }
+
+    .node-item.selected {
+      background: #dbeafe;
+      font-weight: 700;
+    }
+
+    /* ===================================================== */
+    /* WORKSPACE */
+    /* ===================================================== */
+
+    .workspace {
+      position: relative;
+      overflow: auto;
+      background: #dbeafe;
+    }
+
+    .workspace-inner {
+      position: relative;
+      min-width: max-content;
+      min-height: max-content;
+      padding: 40px;
+    }
+
+    #mapWrapper {
+      position: relative;
+      background: white;
+      border: 1px solid #9ca3af;
+      transform-origin: top left;
+    }
+
+    #mapWrapper > svg {
+      display: block;
+    }
+
+    #overlay {
+      position: absolute;
+      left: 0;
+      top: 0;
+      pointer-events: auto;
+      overflow: visible;
+    }
+
+    /* ===================================================== */
+    /* SVG GRAPH */
+    /* ===================================================== */
+
+    .edge {
+      stroke: #475569;
+      stroke-width: .5;
+      pointer-events: stroke;
+      cursor: pointer;
+    }
+
+    .edge:hover {
+      stroke-width: 3;
+    }
+
+    .node-group {
+      cursor: pointer;
+    }
+
+    .node-label {
+      font-size: 7px;
+      font-weight: bold;
+      pointer-events: none;
+
+      paint-order: stroke;
+      stroke: white;
+      stroke-width: 2px;
+      stroke-linejoin: round;
+    }
+
+    .selected-node {
+      stroke: #111827 !important;
+      stroke-width: 2.5 !important;
+    }
+
+    /* ===================================================== */
+    /* TOP FLOATING INFO */
+    /* ===================================================== */
+
+    .floating-info {
+      position: sticky;
+      top: 10px;
+      left: 10px;
+      width: max-content;
+
+      background: rgba(255,255,255,0.94);
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      padding: 8px 10px;
+
+      font-size: 12px;
+      z-index: 50;
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="app">
+
+  <!-- =================================================== -->
+  <!-- SIDEBAR -->
+  <!-- =================================================== -->
+
+  <aside class="sidebar">
+
+    <h1>TomaSafe Node Builder</h1>
+
+    <!-- LOAD SVG -->
+
+    <div class="section">
+      <h3>1. Load SVG</h3>
+
+      <input
+        type="file"
+        id="svgFile"
+        accept=".svg,image/svg+xml"
+      />
+
+      <div class="small">
+        Use the same campus SVG used by your TomaSafe app.
+        Node coordinates will be taken directly from its SVG viewBox.
+      </div>
+    </div>
+
+    <!-- TOOL MODE -->
+
+    <div class="section">
+      <h3>2. Tool</h3>
+
+      <button
+        id="addModeButton"
+        class="primary active"
+      >
+        Add Nodes
+      </button>
+
+      <button
+        id="connectModeButton"
+        class="secondary"
+      >
+        Connect Nodes
+      </button>
+    </div>
+
+    <!-- ZOOM -->
+
+    <div class="section">
+      <h3>Map Zoom</h3>
+
+      <div class="row">
+        <button
+          id="zoomOutButton"
+          class="secondary"
+        >
+          −
+        </button>
+
+        <button
+          id="zoomResetButton"
+          class="secondary"
+        >
+          100%
+        </button>
+
+        <button
+          id="zoomInButton"
+          class="secondary"
+        >
+          +
+        </button>
+      </div>
+
+      <div class="status">
+        Zoom:
+        <strong id="zoomValue">100%</strong>
+      </div>
+
+      <div class="small">
+        You can also hold Ctrl and use the mouse wheel.
+        Zooming does not change exported coordinates.
+      </div>
+    </div>
+
+    <!-- NODE SETTINGS -->
+
+    <div class="section">
+      <h3>Node Settings</h3>
+
+      <label>Node Type</label>
+
+      <select id="nodeType">
+        <option value="hallway">Hallway</option>
+        <option value="door">Door</option>
+        <option value="turn">Turn</option>
+        <option value="junction">Junction</option>
+        <option value="stair">Stair</option>
+        <option value="exit">Exit</option>
+      </select>
+
+      <label>Node Prefix</label>
+
+      <input
+        id="nodePrefix"
+        type="text"
+        value="N"
+      />
+
+      <div
+        id="status"
+        class="status"
+      >
+        Load your SVG, then click the map to place nodes.
+      </div>
+    </div>
+
+    <!-- SELECTED NODE -->
+
+    <div class="section">
+      <h3>Selected Node</h3>
+
+      <label>ID</label>
+
+      <input
+        id="selectedId"
+        type="text"
+      />
+
+      <div class="row">
+        <div>
+          <label>X</label>
+          <input id="selectedX" type="number" step="0.01" />
+        </div>
+
+        <div>
+          <label>Y</label>
+          <input id="selectedY" type="number" step="0.01" />
+        </div>
+      </div>
+
+      <label>Type</label>
+
+      <select id="selectedType">
+        <option value="">None</option>
+        <option value="hallway">Hallway</option>
+        <option value="door">Door</option>
+        <option value="turn">Turn</option>
+        <option value="junction">Junction</option>
+        <option value="stair">Stair</option>
+        <option value="exit">Exit</option>
+      </select>
+
+      <button
+        id="updateNodeButton"
+        class="warning"
+      >
+        Update Selected Node
+      </button>
+
+      <button
+        id="deleteNodeButton"
+        class="danger"
+      >
+        Delete Selected Node
+      </button>
+    </div>
+
+    <!-- NODE LIST -->
+
+    <div class="section">
+      <h3>Nodes</h3>
+
+      <div
+        id="nodeList"
+        class="node-list"
+      ></div>
+    </div>
+
+    <!-- EXPORT -->
+
+    <div class="section">
+      <h3>3. Export</h3>
+
+      <button
+        id="generateButton"
+        class="primary"
+      >
+        Generate Code
+      </button>
+
+      <button
+        id="copyButton"
+        class="secondary"
+      >
+        Copy Code
+      </button>
+
+      <button
+        id="downloadButton"
+        class="secondary"
+      >
+        Download JSON Backup
+      </button>
+
+      <button
+        id="loadJsonButton"
+        class="secondary"
+      >
+        Load JSON Backup
+      </button>
+
+      <input
+        type="file"
+        id="jsonFileInput"
+        accept=".json,application/json"
+        hidden
+      />
+
+      <button
+        id="clearButton"
+        class="danger"
+      >
+        Clear Graph
+      </button>
+
+      <textarea
+        id="output"
+        readonly
+      ></textarea>
+    </div>
+
+  </aside>
+
+  <!-- =================================================== -->
+  <!-- WORKSPACE -->
+  <!-- =================================================== -->
+
+  <main
+    id="workspace"
+    class="workspace"
+  >
+
+    <div class="floating-info">
+      Click map = add node |
+      Connect mode = click two nodes |
+      Ctrl + wheel = zoom
+    </div>
+
+    <div class="workspace-inner">
+
+      <div id="mapWrapper">
+
+        <svg
+          id="placeholder"
+          viewBox="0 0 800 800"
+          width="800"
+          height="800"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <rect
+            width="800"
+            height="800"
+            fill="#ffffff"
+          />
+
+          <text
+            x="400"
+            y="400"
+            text-anchor="middle"
+            font-size="24"
+            fill="#9ca3af"
+          >
+            Load your campus SVG
+          </text>
+        </svg>
+
+        <svg
+          id="overlay"
+          viewBox="0 0 800 800"
+          width="800"
+          height="800"
+          xmlns="http://www.w3.org/2000/svg"
+        ></svg>
+
+      </div>
+
+    </div>
+
+  </main>
+
+</div>
+
+<script>
+
+  // =====================================================
+  // ELEMENTS
+  // =====================================================
+
+  const svgFileInput =
+    document.getElementById("svgFile");
+
+  const mapWrapper =
+    document.getElementById("mapWrapper");
+
+  const workspace =
+    document.getElementById("workspace");
+
+  const overlay =
+    document.getElementById("overlay");
+
+  const nodeTypeSelect =
+    document.getElementById("nodeType");
+
+  const nodePrefixInput =
+    document.getElementById("nodePrefix");
+
+  const addModeButton =
+    document.getElementById("addModeButton");
+
+  const connectModeButton =
+    document.getElementById("connectModeButton");
+
+  const status =
+    document.getElementById("status");
+
+  const selectedIdInput =
+    document.getElementById("selectedId");
+
+  const selectedXInput =
+    document.getElementById("selectedX");
+
+  const selectedYInput =
+    document.getElementById("selectedY");
+
+  const selectedTypeInput =
+    document.getElementById("selectedType");
+
+  const updateNodeButton =
+    document.getElementById("updateNodeButton");
+
+  const deleteNodeButton =
+    document.getElementById("deleteNodeButton");
+
+  const nodeList =
+    document.getElementById("nodeList");
+
+  const generateButton =
+    document.getElementById("generateButton");
+
+  const copyButton =
+    document.getElementById("copyButton");
+
+  const output =
+    document.getElementById("output");
+
+  const zoomInButton =
+    document.getElementById("zoomInButton");
+
+  const zoomOutButton =
+    document.getElementById("zoomOutButton");
+
+  const zoomResetButton =
+    document.getElementById("zoomResetButton");
+
+  const zoomValue =
+    document.getElementById("zoomValue");
+
+  const clearButton =
+    document.getElementById("clearButton");
+
+  const downloadButton =
+    document.getElementById("downloadButton");
+
+  const loadJsonButton =
+    document.getElementById("loadJsonButton");
+
+  const jsonFileInput =
+    document.getElementById("jsonFileInput");
+
+
+  // =====================================================
+  // STATE
+  // =====================================================
+
+  let mode = "add";
+
+  let nodes = [];
+  let edges = [];
+
+  let selectedNodeId = null;
+
+  let connectStartNode = null;
+
+  let nodeCounter = 1;
+
+  let currentViewBox = {
+    minX: 0,
+    minY: 0,
+    width: 800,
+    height: 800,
+  };
+
+  let zoomLevel = 1;
+
+  const MIN_ZOOM = 0.5;
+  const MAX_ZOOM = 10;
+  const ZOOM_STEP = 0.5;
+
+
+  // =====================================================
+  // NODE COLORS
+  // =====================================================
+
+  function getNodeColor(type) {
+
+    switch (type) {
+
+      case "door":
+        return "#8b5cf6";
+
+      case "turn":
+        return "#f59e0b";
+
+      case "junction":
+        return "#06b6d4";
+
+      case "stair":
+        return "#ec4899";
+
+      case "exit":
+        return "#16a34a";
+
+      default:
+        return "#2563eb";
+    }
+
+  }
+
+
+  // =====================================================
+  // MODE
+  // =====================================================
+
+  function setMode(newMode) {
+
+    mode = newMode;
+
+    addModeButton.classList.remove("active");
+    connectModeButton.classList.remove("active");
+
+    connectStartNode = null;
+
+    if (mode === "add") {
+
+      addModeButton.classList.add("active");
+
+      status.textContent =
+        "Add mode: click anywhere on the SVG to create a node.";
+
+    } else {
+
+      connectModeButton.classList.add("active");
+
+      status.textContent =
+        "Connect mode: click the first node, then click the second node.";
+
+    }
+
+    renderGraph();
+
+  }
+
+
+  addModeButton.addEventListener(
+    "click",
+    () => setMode("add")
+  );
+
+
+  connectModeButton.addEventListener(
+    "click",
+    () => setMode("connect")
+  );
+
+
+  // =====================================================
+  // LOAD SVG
+  // =====================================================
+
+  svgFileInput.addEventListener(
+    "change",
+    async event => {
+
+      const file =
+        event.target.files[0];
+
+      if (!file) return;
+
+      const text =
+        await file.text();
+
+      const parser =
+        new DOMParser();
+
+      const doc =
+        parser.parseFromString(
+          text,
+          "image/svg+xml"
+        );
+
+      const loadedSvg =
+        doc.documentElement;
+
+      const parserError =
+        loadedSvg.querySelector("parsererror");
+
+      if (parserError) {
+
+        alert(
+          "The selected SVG could not be read."
+        );
+
+        return;
+      }
+
+      const viewBoxText =
+        loadedSvg.getAttribute("viewBox");
+
+      if (!viewBoxText) {
+
+        alert(
+          "Your SVG needs a viewBox attribute."
+        );
+
+        return;
+      }
+
+      const values =
+        viewBoxText
+          .trim()
+          .split(/[\s,]+/)
+          .map(Number);
+
+      if (
+        values.length !== 4 ||
+        values.some(Number.isNaN)
+      ) {
+
+        alert(
+          "Invalid SVG viewBox."
+        );
+
+        return;
+      }
+
+      currentViewBox = {
+        minX: values[0],
+        minY: values[1],
+        width: values[2],
+        height: values[3],
+      };
+
+      loadedSvg.setAttribute(
+        "id",
+        "loadedMap"
+      );
+
+      loadedSvg.setAttribute(
+        "width",
+        currentViewBox.width
+      );
+
+      loadedSvg.setAttribute(
+        "height",
+        currentViewBox.height
+      );
+
+      loadedSvg.style.width =
+        currentViewBox.width + "px";
+
+      loadedSvg.style.height =
+        currentViewBox.height + "px";
+
+      const oldMap =
+        mapWrapper.querySelector(
+          "#placeholder, #loadedMap"
+        );
+
+      if (oldMap) {
+        oldMap.remove();
+      }
+
+      mapWrapper.insertBefore(
+        loadedSvg,
+        overlay
+      );
+
+      overlay.setAttribute(
+        "viewBox",
+        viewBoxText
+      );
+
+      overlay.setAttribute(
+        "width",
+        currentViewBox.width
+      );
+
+      overlay.setAttribute(
+        "height",
+        currentViewBox.height
+      );
+
+      overlay.style.width =
+        currentViewBox.width + "px";
+
+      overlay.style.height =
+        currentViewBox.height + "px";
+
+      mapWrapper.style.width =
+        currentViewBox.width + "px";
+
+      mapWrapper.style.height =
+        currentViewBox.height + "px";
+
+      zoomLevel = 1;
+      applyZoom();
+
+      status.textContent =
+        `SVG loaded. viewBox: ${viewBoxText}`;
+
+    }
+  );
+
+
+  // =====================================================
+  // COORDINATE CONVERSION
+  //
+  // THIS IS THE IMPORTANT PART.
+  //
+  // Even when zoomed, this returns coordinates from
+  // the original SVG viewBox.
+  // =====================================================
+
+  function getSvgCoordinates(event) {
+
+    const point =
+      overlay.createSVGPoint();
+
+    point.x =
+      event.clientX;
+
+    point.y =
+      event.clientY;
+
+    const screenMatrix =
+      overlay.getScreenCTM();
+
+    if (!screenMatrix) {
+      return null;
+    }
+
+    const transformed =
+      point.matrixTransform(
+        screenMatrix.inverse()
+      );
+
+    return {
+      x: Number(
+        transformed.x.toFixed(2)
+      ),
+
+      y: Number(
+        transformed.y.toFixed(2)
+      ),
+    };
+
+  }
+
+
+  // =====================================================
+  // ADD NODE
+  // =====================================================
+
+  overlay.addEventListener(
+    "click",
+    event => {
+
+      if (mode !== "add") {
+        return;
+      }
+
+      const clickedNode =
+        event.target.closest?.(
+          ".node-group"
+        );
+
+      if (clickedNode) {
+        return;
+      }
+
+      const point =
+        getSvgCoordinates(event);
+
+      if (!point) {
+        return;
+      }
+
+      const prefix =
+        nodePrefixInput.value.trim() ||
+        "N";
+
+      let id =
+        `${prefix}${nodeCounter}`;
+
+      while (
+        nodes.some(
+          node => node.id === id
+        )
+      ) {
+
+        nodeCounter++;
+
+        id =
+          `${prefix}${nodeCounter}`;
+
+      }
+
+      nodeCounter++;
+
+      const type =
+        nodeTypeSelect.value;
+
+      nodes.push({
+        id,
+        x: point.x,
+        y: point.y,
+        type,
+      });
+
+      selectedNodeId = id;
+
+      renderGraph();
+      updateSelectedNodePanel();
+
+      status.textContent =
+        `${id} created at (${point.x}, ${point.y})`;
+
+    }
+  );
+
+
+  // =====================================================
+  // NODE CLICK
+  // =====================================================
+
+  function nodeClicked(
+    event,
+    nodeId
+  ) {
+
+    event.stopPropagation();
+
+    selectedNodeId =
+      nodeId;
+
+    updateSelectedNodePanel();
+
+
+    if (mode === "add") {
+
+      renderGraph();
+
+      return;
+    }
+
+
+    if (mode === "connect") {
+
+      if (!connectStartNode) {
+
+        connectStartNode =
+          nodeId;
+
+        status.textContent =
+          `Selected ${nodeId}. Now click another node.`;
+
+        renderGraph();
+
+        return;
+      }
+
+
+      if (
+        connectStartNode ===
+        nodeId
+      ) {
+
+        status.textContent =
+          "Choose a different second node.";
+
+        return;
+      }
+
+
+      const alreadyExists =
+        edges.some(
+          edge =>
+            (
+              edge.from ===
+                connectStartNode &&
+              edge.to ===
+                nodeId
+            )
+            ||
+            (
+              edge.to ===
+                connectStartNode &&
+              edge.from ===
+                nodeId
+            )
+        );
+
+
+      if (!alreadyExists) {
+
+        edges.push({
+          from: connectStartNode,
+          to: nodeId,
+        });
+
+        status.textContent =
+          `Connected ${connectStartNode} ↔ ${nodeId}`;
+
+      } else {
+
+        status.textContent =
+          "That edge already exists.";
+
+      }
+
+
+      connectStartNode = null;
+
+      renderGraph();
+
+    }
+
+  }
+
+
+  // =====================================================
+  // RENDER GRAPH
+  // =====================================================
+
+  function renderGraph() {
+
+    overlay.innerHTML = "";
+
+
+    // -------------------------------
+    // EDGES
+    // -------------------------------
+
+    edges.forEach(
+      (edge, edgeIndex) => {
+
+        const from =
+          nodes.find(
+            node =>
+              node.id === edge.from
+          );
+
+        const to =
+          nodes.find(
+            node =>
+              node.id === edge.to
+          );
+
+        if (!from || !to) {
+          return;
+        }
+
+
+        const line =
+          document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "line"
+          );
+
+
+        line.setAttribute(
+          "x1",
+          from.x
+        );
+
+        line.setAttribute(
+          "y1",
+          from.y
+        );
+
+        line.setAttribute(
+          "x2",
+          to.x
+        );
+
+        line.setAttribute(
+          "y2",
+          to.y
+        );
+
+        line.setAttribute(
+          "class",
+          "edge"
+        );
+
+
+        line.addEventListener(
+          "dblclick",
+          event => {
+
+            event.stopPropagation();
+
+            edges.splice(
+              edgeIndex,
+              1
+            );
+
+            renderGraph();
+
+            status.textContent =
+              "Edge deleted.";
+
+          }
+        );
+
+
+        overlay.appendChild(
+          line
+        );
+
+      }
+    );
+
+
+    // -------------------------------
+    // NODES
+    // -------------------------------
+
+    nodes.forEach(
+      node => {
+
+        const group =
+          document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "g"
+          );
+
+
+        group.setAttribute(
+          "class",
+          "node-group"
+        );
+
+
+        group.addEventListener(
+          "click",
+          event =>
+            nodeClicked(
+              event,
+              node.id
+            )
+        );
+
+
+        const circle =
+          document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "circle"
+          );
+
+
+        circle.setAttribute(
+          "cx",
+          node.x
+        );
+
+        circle.setAttribute(
+          "cy",
+          node.y
+        );
+
+        circle.setAttribute(
+          "r",
+          node.type === "exit"
+            ? 1
+            : 1
+        );
+
+        circle.setAttribute(
+          "fill",
+          getNodeColor(
+            node.type
+          )
+        );
+
+        circle.setAttribute(
+          "stroke",
+          "#ffffff"
+        );
+
+        circle.setAttribute(
+          "stroke-width",
+          "1"
+        );
+
+
+        if (
+          node.id ===
+          selectedNodeId
+        ) {
+
+          circle.classList.add(
+            "selected-node"
+          );
+
+        }
+
+
+        if (
+          node.id ===
+          connectStartNode
+        ) {
+
+          circle.setAttribute(
+            "stroke",
+            "#f59e0b"
+          );
+
+          circle.setAttribute(
+            "stroke-width",
+            "1"
+          );
+
+        }
+
+
+        const text =
+          document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "text"
+          );
+
+
+        text.setAttribute(
+          "x",
+          node.x + 6
+        );
+
+        text.setAttribute(
+          "y",
+          node.y - 6
+        );
+
+        text.setAttribute(
+          "class",
+          "node-label"
+        );
+
+        text.textContent =
+          node.id;
+
+
+        group.appendChild(
+          circle
+        );
+
+        group.appendChild(
+          text
+        );
+
+        overlay.appendChild(
+          group
+        );
+
+      }
+    );
+
+
+    updateNodeList();
+
+  }
+
+
+  // =====================================================
+  // SELECTED NODE PANEL
+  // =====================================================
+
+  function updateSelectedNodePanel() {
+
+    const node =
+      nodes.find(
+        item =>
+          item.id ===
+          selectedNodeId
+      );
+
+
+    if (!node) {
+
+      selectedIdInput.value =
+        "";
+
+      selectedXInput.value =
+        "";
+
+      selectedYInput.value =
+        "";
+
+      selectedTypeInput.value =
+        "";
+
+      return;
+
+    }
+
+
+    selectedIdInput.value =
+      node.id;
+
+    selectedXInput.value =
+      node.x;
+
+    selectedYInput.value =
+      node.y;
+
+    selectedTypeInput.value =
+      node.type;
+
+  }
+
+
+  // =====================================================
+  // UPDATE NODE
+  // =====================================================
+
+  updateNodeButton.addEventListener(
+    "click",
+    () => {
+
+      const node =
+        nodes.find(
+          item =>
+            item.id ===
+            selectedNodeId
+        );
+
+      if (!node) {
+
+        status.textContent =
+          "Select a node first.";
+
+        return;
+      }
+
+
+      const newId =
+        selectedIdInput.value.trim();
+
+      const x =
+        Number(
+          selectedXInput.value
+        );
+
+      const y =
+        Number(
+          selectedYInput.value
+        );
+
+      const type =
+        selectedTypeInput.value;
+
+
+      if (!newId) {
+
+        alert(
+          "Node ID cannot be empty."
+        );
+
+        return;
+      }
+
+
+      if (
+        Number.isNaN(x) ||
+        Number.isNaN(y)
+      ) {
+
+        alert(
+          "Invalid X or Y coordinate."
+        );
+
+        return;
+      }
+
+
+      const duplicate =
+        nodes.some(
+          item =>
+            item.id === newId &&
+            item.id !== node.id
+        );
+
+
+      if (duplicate) {
+
+        alert(
+          "Another node already uses that ID."
+        );
+
+        return;
+      }
+
+
+      const oldId =
+        node.id;
+
+
+      node.id =
+        newId;
+
+      node.x =
+        Number(
+          x.toFixed(2)
+        );
+
+      node.y =
+        Number(
+          y.toFixed(2)
+        );
+
+      node.type =
+        type;
+
+
+      edges =
+        edges.map(
+          edge => ({
+            from:
+              edge.from === oldId
+                ? newId
+                : edge.from,
+
+            to:
+              edge.to === oldId
+                ? newId
+                : edge.to,
+          })
+        );
+
+
+      selectedNodeId =
+        newId;
+
+
+      if (
+        connectStartNode ===
+        oldId
+      ) {
+
+        connectStartNode =
+          newId;
+
+      }
+
+
+      renderGraph();
+      updateSelectedNodePanel();
+
+      status.textContent =
+        `${newId} updated.`;
+
+    }
+  );
+
+
+  // =====================================================
+  // DELETE NODE
+  // =====================================================
+
+  deleteNodeButton.addEventListener(
+    "click",
+    () => {
+
+      if (!selectedNodeId) {
+
+        status.textContent =
+          "Select a node first.";
+
+        return;
+      }
+
+
+      const deletedId =
+        selectedNodeId;
+
+
+      nodes =
+        nodes.filter(
+          node =>
+            node.id !==
+            deletedId
+        );
+
+
+      edges =
+        edges.filter(
+          edge =>
+            edge.from !==
+              deletedId &&
+            edge.to !==
+              deletedId
+        );
+
+
+      if (
+        connectStartNode ===
+        deletedId
+      ) {
+
+        connectStartNode =
+          null;
+
+      }
+
+
+      selectedNodeId =
+        null;
+
+
+      updateSelectedNodePanel();
+      renderGraph();
+
+
+      status.textContent =
+        `${deletedId} deleted.`;
+
+    }
+  );
+
+
+  // =====================================================
+  // NODE LIST
+  // =====================================================
+
+  function updateNodeList() {
+
+    nodeList.innerHTML = "";
+
+
+    if (nodes.length === 0) {
+
+      const empty =
+        document.createElement(
+          "div"
+        );
+
+      empty.className =
+        "node-item";
+
+      empty.textContent =
+        "No nodes yet.";
+
+      nodeList.appendChild(
+        empty
+      );
+
+      return;
+
+    }
+
+
+    nodes.forEach(
+      node => {
+
+        const item =
+          document.createElement(
+            "div"
+          );
+
+
+        item.className =
+          "node-item";
+
+
+        if (
+          node.id ===
+          selectedNodeId
+        ) {
+
+          item.classList.add(
+            "selected"
+          );
+
+        }
+
+
+        item.textContent =
+          `${node.id} | ${node.type} | (${node.x}, ${node.y})`;
+
+
+        item.addEventListener(
+          "click",
+          () => {
+
+            selectedNodeId =
+              node.id;
+
+            updateSelectedNodePanel();
+            renderGraph();
+
+          }
+        );
+
+
+        nodeList.appendChild(
+          item
+        );
+
+      }
+    );
+
+  }
+
+
+  // =====================================================
+  // ZOOM
+  // =====================================================
+
+  function applyZoom() {
+
+    mapWrapper.style.transform =
+      `scale(${zoomLevel})`;
+
+
+    zoomValue.textContent =
+      `${Math.round(
+        zoomLevel * 100
+      )}%`;
+
+  }
+
+
+  zoomInButton.addEventListener(
+    "click",
+    () => {
+
+      zoomLevel =
+        Math.min(
+          zoomLevel +
+            ZOOM_STEP,
+          MAX_ZOOM
+        );
+
+      applyZoom();
+
+    }
+  );
+
+
+  zoomOutButton.addEventListener(
+    "click",
+    () => {
+
+      zoomLevel =
+        Math.max(
+          zoomLevel -
+            ZOOM_STEP,
+          MIN_ZOOM
+        );
+
+      applyZoom();
+
+    }
+  );
+
+
+  zoomResetButton.addEventListener(
+    "click",
+    () => {
+
+      zoomLevel = 1;
+
+      applyZoom();
+
+    }
+  );
+
+
+  workspace.addEventListener(
+    "wheel",
+    event => {
+
+      if (!event.ctrlKey) {
+        return;
+      }
+
+
+      event.preventDefault();
+
+
+      const oldZoom =
+        zoomLevel;
+
+
+      if (event.deltaY < 0) {
+
+        zoomLevel =
+          Math.min(
+            zoomLevel + 0.25,
+            MAX_ZOOM
+          );
+
+      } else {
+
+        zoomLevel =
+          Math.max(
+            zoomLevel - 0.25,
+            MIN_ZOOM
+          );
+
+      }
+
+
+      if (
+        zoomLevel ===
+        oldZoom
+      ) {
+
+        return;
+
+      }
+
+
+      // mouse position inside workspace
+      const rect =
+        workspace.getBoundingClientRect();
+
+      const mouseX =
+        event.clientX -
+        rect.left;
+
+      const mouseY =
+        event.clientY -
+        rect.top;
+
+
+      // point in unscaled content
+      const contentX =
+        (
+          workspace.scrollLeft +
+          mouseX
+        ) /
+        oldZoom;
+
+      const contentY =
+        (
+          workspace.scrollTop +
+          mouseY
+        ) /
+        oldZoom;
+
+
+      applyZoom();
+
+
+      // keep mouse approximately over same map point
+      workspace.scrollLeft =
+        contentX *
+          zoomLevel -
+        mouseX;
+
+      workspace.scrollTop =
+        contentY *
+          zoomLevel -
+        mouseY;
+
+    },
+    {
+      passive: false,
+    }
+  );
+
+
+  // =====================================================
+  // GENERATE CODE
+  // =====================================================
+
+  function generateCode() {
+
+    const nodeLines =
+      nodes.map(
+        node => {
+
+          const isExit =
+            node.type ===
+            "exit";
+
+
+          return `  ${node.id}: {
+    x: ${node.x},
+    y: ${node.y},
+    name: "${node.id}",
+    type: "${node.type}"${
+      isExit
+        ? `,
+    isExit: true`
+        : ""
+    }
+  }`;
+
+        }
+      );
+
+
+    const edgeLines =
+      edges.map(
+        edge =>
+          `  { from: "${edge.from}", to: "${edge.to}" }`
+      );
+
+
+    const code =
+`export const NODES = {
+${nodeLines.join(",\n")}
+};
+
+export const EDGES = [
+${edgeLines.join(",\n")}
+];`;
+
+
+    output.value =
+      code;
+
+  }
+
+
+  generateButton.addEventListener(
+    "click",
+    generateCode
+  );
+
+
+  // =====================================================
+  // COPY CODE
+  // =====================================================
+
+  copyButton.addEventListener(
+    "click",
+    async () => {
+
+      if (!output.value) {
+        generateCode();
+      }
+
+
+      try {
+
+        await navigator.clipboard.writeText(
+          output.value
+        );
+
+        status.textContent =
+          "Code copied.";
+
+      } catch {
+
+        output.select();
+
+        document.execCommand(
+          "copy"
+        );
+
+        status.textContent =
+          "Code copied.";
+
+      }
+
+    }
+  );
+
+
+  // =====================================================
+  // SAVE GRAPH JSON
+  // =====================================================
+
+  downloadButton.addEventListener(
+    "click",
+    () => {
+
+      const data = {
+        viewBox:
+          currentViewBox,
+
+        nodes,
+
+        edges,
+      };
+
+
+      const blob =
+        new Blob(
+          [
+            JSON.stringify(
+              data,
+              null,
+              2
+            )
+          ],
+          {
+            type:
+              "application/json"
+          }
+        );
+
+
+      const url =
+        URL.createObjectURL(
+          blob
+        );
+
+
+      const link =
+        document.createElement(
+          "a"
+        );
+
+
+      link.href =
+        url;
+
+      link.download =
+        "tomasafe-navigation-graph.json";
+
+
+      document.body.appendChild(
+        link
+      );
+
+      link.click();
+
+      link.remove();
+
+
+      URL.revokeObjectURL(
+        url
+      );
+
+
+      status.textContent =
+        "Graph JSON downloaded.";
+
+    }
+  );
+
+
+  // =====================================================
+  // LOAD GRAPH JSON
+  // =====================================================
+
+  loadJsonButton.addEventListener(
+    "click",
+    () => {
+
+      jsonFileInput.click();
+
+    }
+  );
+
+
+  jsonFileInput.addEventListener(
+    "change",
+    async event => {
+
+      const file =
+        event.target.files[0];
+
+
+      if (!file) {
+        return;
+      }
+
+
+      try {
+
+        const text =
+          await file.text();
+
+
+        const data =
+          JSON.parse(
+            text
+          );
+
+
+        if (
+          !Array.isArray(
+            data.nodes
+          ) ||
+          !Array.isArray(
+            data.edges
+          )
+        ) {
+
+          throw new Error(
+            "Invalid graph file."
+          );
+
+        }
+
+
+        nodes =
+          data.nodes;
+
+        edges =
+          data.edges;
+
+
+        selectedNodeId =
+          null;
+
+        connectStartNode =
+          null;
+
+
+        nodeCounter =
+          nodes.length + 1;
+
+
+        renderGraph();
+
+        updateSelectedNodePanel();
+
+
+        status.textContent =
+          "Graph JSON loaded.";
+
+      } catch (error) {
+
+        alert(
+          "Could not load this graph JSON file."
+        );
+
+      }
+
+
+      jsonFileInput.value =
+        "";
+
+    }
+  );
+
+
+  // =====================================================
+  // CLEAR GRAPH
+  // =====================================================
+
+  clearButton.addEventListener(
+    "click",
+    () => {
+
+      const confirmed =
+        confirm(
+          "Delete all nodes and edges?"
+        );
+
+
+      if (!confirmed) {
+        return;
+      }
+
+
+      nodes = [];
+      edges = [];
+
+      selectedNodeId =
+        null;
+
+      connectStartNode =
+        null;
+
+      nodeCounter = 1;
+
+
+      output.value =
+        "";
+
+
+      renderGraph();
+      updateSelectedNodePanel();
+
+
+      status.textContent =
+        "Graph cleared.";
+
+    }
+  );
+
+
+  // =====================================================
+  // INITIAL RENDER
+  // =====================================================
+
+  renderGraph();
+
+</script>
+
+</body>
+</html>
